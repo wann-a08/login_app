@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import '../services/user_service.dart';
 
@@ -12,15 +13,18 @@ class DataPage extends StatefulWidget {
 class _DataPageState extends State<DataPage> {
   final UserService _userService = UserService();
 
+  // Warna utama halaman.
   static const Color navy = Color(0xFF172B4D);
   static const Color blue = Color(0xFF2563EB);
   static const Color background = Color(0xFFF4F6FA);
 
+  // Variabel untuk menyimpan data user dan status halaman.
   List<Map<String, dynamic>> users = [];
 
   bool isLoading = false;
   String? errorMessage;
 
+  // Variabel pagination.
   int currentPage = 1;
   final int limit = 10;
   int total = 0;
@@ -32,7 +36,7 @@ class _DataPageState extends State<DataPage> {
     loadUsers();
   }
 
-  // Mengambil data dan metadata pagination dari API.
+  // Mengambil data user beserta metadata pagination dari API.
   Future<void> loadUsers({int page = 1}) async {
     if (isLoading) return;
 
@@ -59,7 +63,9 @@ class _DataPageState extends State<DataPage> {
       if (!mounted) return;
 
       setState(() {
-        errorMessage = error.toString().replaceFirst('Exception: ', '');
+        errorMessage = error
+            .toString()
+            .replaceFirst('Exception: ', '');
       });
     } finally {
       if (mounted) {
@@ -68,6 +74,131 @@ class _DataPageState extends State<DataPage> {
         });
       }
     }
+  }
+
+  // Mengambil inisial dari nama user untuk avatar.
+  String getInitials(String name) {
+    final trimmedName = name.trim();
+
+    if (trimmedName.isEmpty) return '?';
+
+    final words = trimmedName.split(RegExp(r'\s+'));
+
+    if (words.length == 1) {
+      return words.first.characters.first.toUpperCase();
+    }
+
+    return '${words.first.characters.first}'
+            '${words.last.characters.first}'
+        .toUpperCase();
+  }
+
+  // Membuat warna avatar berdasarkan ID user.
+  Color getAvatarColor(dynamic id) {
+    const colors = [
+      Color(0xFFDBEAFE),
+      Color(0xFFD1FAE5),
+      Color(0xFFF3E8FF),
+      Color(0xFFFFEDD5),
+      Color(0xFFFFE4E6),
+    ];
+
+    final index = (int.tryParse('$id') ?? 0).abs() % colors.length;
+    return colors[index];
+  }
+
+  // Membuat warna teks avatar berdasarkan ID user.
+  Color getAvatarTextColor(dynamic id) {
+    const colors = [
+      Color(0xFF2563EB),
+      Color(0xFF059669),
+      Color(0xFF9333EA),
+      Color(0xFFEA580C),
+      Color(0xFFE11D48),
+    ];
+
+    final index = (int.tryParse('$id') ?? 0).abs() % colors.length;
+    return colors[index];
+  }
+
+  // Widget satu card user berisi avatar, nama, dan email.
+  Widget userCard(Map<String, dynamic> user) {
+    final name = (user['name'] ?? 'Tanpa Nama').toString();
+    final email = (user['email'] ?? 'Email tidak tersedia').toString();
+    final id = user['id'];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE8EDF4)),
+      ),
+      child: Row(
+        children: [
+          // Avatar lingkaran dengan inisial nama.
+          Container(
+            width: 52,
+            height: 52,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: getAvatarColor(id),
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              getInitials(name),
+              style: TextStyle(
+                color: getAvatarTextColor(id),
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+
+          // Nama dan email user.
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: navy,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  email,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // Informasi ID user.
+          Text(
+            '#$id',
+            style: TextStyle(
+              color: Colors.grey.shade400,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // Membuat tombol navigasi pagination.
@@ -92,10 +223,15 @@ class _DataPageState extends State<DataPage> {
 
   @override
   Widget build(BuildContext context) {
-    final firstItem = total == 0 ? 0 : (currentPage - 1) * limit + 1;
+    final firstItem = total == 0
+        ? 0
+        : (currentPage - 1) * limit + 1;
+
     final lastItem = total == 0
         ? 0
-        : ((currentPage * limit) < total ? currentPage * limit : total);
+        : ((currentPage * limit) < total
+            ? currentPage * limit
+            : total);
 
     return Scaffold(
       backgroundColor: background,
@@ -110,7 +246,9 @@ class _DataPageState extends State<DataPage> {
         actions: [
           IconButton(
             tooltip: 'Muat ulang',
-            onPressed: isLoading ? null : () => loadUsers(page: currentPage),
+            onPressed: isLoading
+                ? null
+                : () => loadUsers(page: currentPage),
             icon: const Icon(Icons.refresh),
           ),
           const SizedBox(width: 8),
@@ -132,7 +270,7 @@ class _DataPageState extends State<DataPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Kelola dan lihat data pengguna yang tersimpan.',
+                'Lihat pengguna yang tersimpan di database.',
                 style: TextStyle(
                   color: Colors.grey.shade600,
                   fontSize: 14,
@@ -140,7 +278,7 @@ class _DataPageState extends State<DataPage> {
               ),
               const SizedBox(height: 20),
 
-              // Kartu informasi jumlah data.
+              // Kartu informasi total pengguna.
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
@@ -198,10 +336,11 @@ class _DataPageState extends State<DataPage> {
               ),
               const SizedBox(height: 20),
 
-              // Kartu tabel data.
+              // Area daftar user dan pagination.
               Expanded(
                 child: Container(
                   width: double.infinity,
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
@@ -210,8 +349,13 @@ class _DataPageState extends State<DataPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Judul daftar user.
                       Padding(
-                        padding: const EdgeInsets.all(18),
+                        padding: const EdgeInsets.only(
+                          left: 2,
+                          right: 2,
+                          bottom: 14,
+                        ),
                         child: Row(
                           children: [
                             const Expanded(
@@ -234,8 +378,8 @@ class _DataPageState extends State<DataPage> {
                           ],
                         ),
                       ),
-                      Divider(height: 1, color: Colors.grey.shade200),
 
+                      // Menampilkan loading, error, data, atau kondisi kosong.
                       Expanded(
                         child: Builder(
                           builder: (context) {
@@ -278,53 +422,23 @@ class _DataPageState extends State<DataPage> {
 
                             if (users.isEmpty) {
                               return const Center(
-                                child: Text('Belum ada data pengguna.'),
+                                child: Text(
+                                  'Belum ada data pengguna.',
+                                ),
                               );
                             }
 
                             return Stack(
                               children: [
-                                SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: SingleChildScrollView(
-                                    child: DataTable(
-                                      headingRowColor:
-                                          WidgetStateProperty.all(
-                                        const Color(0xFFF8FAFC),
-                                      ),
-                                      headingTextStyle: const TextStyle(
-                                        color: navy,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      dataTextStyle: const TextStyle(
-                                        color: Color(0xFF334155),
-                                        fontSize: 13,
-                                      ),
-                                      columnSpacing: 32,
-                                      horizontalMargin: 20,
-                                      columns: const [
-                                        DataColumn(label: Text('ID')),
-                                        DataColumn(label: Text('Nama')),
-                                        DataColumn(label: Text('Email')),
-                                      ],
-                                      rows: users.map((user) {
-                                        return DataRow(
-                                          cells: [
-                                            DataCell(
-                                              Text('${user['id'] ?? '-'}'),
-                                            ),
-                                            DataCell(
-                                              Text('${user['name'] ?? '-'}'),
-                                            ),
-                                            DataCell(
-                                              Text('${user['email'] ?? '-'}'),
-                                            ),
-                                          ],
-                                        );
-                                      }).toList(),
-                                    ),
-                                  ),
+                                // Daftar card yang bisa di-scroll.
+                                ListView.builder(
+                                  itemCount: users.length,
+                                  itemBuilder: (context, index) {
+                                    return userCard(users[index]);
+                                  },
                                 ),
+
+                                // Indikator saat memuat halaman berikutnya.
                                 if (isLoading)
                                   const Align(
                                     alignment: Alignment.topCenter,
@@ -339,14 +453,14 @@ class _DataPageState extends State<DataPage> {
                         ),
                       ),
 
-                      Divider(height: 1, color: Colors.grey.shade200),
+                      Divider(
+                        height: 1,
+                        color: Colors.grey.shade200,
+                      ),
 
-                      // Kontrol pagination.
+                      // Kontrol pagination tetap dipertahankan.
                       Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
+                        padding: const EdgeInsets.only(top: 10),
                         child: Wrap(
                           alignment: WrapAlignment.spaceBetween,
                           crossAxisAlignment: WrapCrossAlignment.center,
@@ -366,7 +480,9 @@ class _DataPageState extends State<DataPage> {
                                 pageButton(
                                   icon: Icons.chevron_left,
                                   onPressed: currentPage > 1
-                                      ? () => loadUsers(page: currentPage - 1)
+                                      ? () => loadUsers(
+                                            page: currentPage - 1,
+                                          )
                                       : null,
                                 ),
                                 const SizedBox(width: 8),
@@ -392,7 +508,9 @@ class _DataPageState extends State<DataPage> {
                                 pageButton(
                                   icon: Icons.chevron_right,
                                   onPressed: currentPage < totalPages
-                                      ? () => loadUsers(page: currentPage + 1)
+                                      ? () => loadUsers(
+                                            page: currentPage + 1,
+                                          )
                                       : null,
                                 ),
                               ],
