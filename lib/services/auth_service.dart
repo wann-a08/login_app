@@ -1,88 +1,44 @@
+import 'api_client.dart';
+import '../models/auth_user.dart';
 
-import 'dart:convert';
-import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:http/http.dart' as http;
-
-// Class untuk mengelola autentikasi ke REST API.
+// Class untuk login, validasi sesi, dan logout admin.
 class AuthService {
-  static const String baseUrl = 'http://localhost:3000/api';
+  final ApiClient _api = ApiClient.instance;
 
-  static const FlutterSecureStorage _storage =
-  FlutterSecureStorage();
-
-  static const String _tokenKey = 'auth_token';
-
-  // Mengirim username/email dan password ke API login.
-  Future<Map<String, dynamic>> login({
+  Future<AuthUser> login({
     required String identifier,
     required String password,
   }) async {
-    final uri = Uri.parse('$baseUrl/auth/login');
-
-    final response = await http
-        .post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: jsonEncode({
-        'identifier': identifier,
-        'password': password,
-      }),
-    )
-        .timeout(const Duration(seconds: 15));
-
-    final Map<String, dynamic> result;
-
-    try {
-      final decoded = jsonDecode(response.body);
-
-      if (decoded is! Map<String, dynamic>) {
-        throw const FormatException('Format respons API tidak valid.');
-      }
-
-      result = decoded;
-    } on FormatException {
-      throw Exception(
-        'Respons API bukan JSON yang valid '
-            '(HTTP ${response.statusCode}).',
-      );
+    final result = await _api.post(
+      '/auth/login',
+      authenticated: false,
+      body: {'identifier': identifier, 'password': password},
+    );
+    final data = _requireData(result);
+    final token = data['token'];
+    if (token is! String || token.isEmpty) {
+      throw const ApiException(message: 'Respons login tidak memuat token yang valid.');
     }
-
-    if (response.statusCode >= 200 &&
-        response.statusCode < 300 &&
-        result['success'] == true) {
-      final data = result['data'];
-
-      if (data is! Map<String, dynamic> ||
-          data['token'] is! String ||
-          (data['token'] as String).isEmpty) {
-        throw Exception('Respons login tidak memuat token yang valid.');
-      }
-
-      await _storage.write(
-        key: _tokenKey,
-        value: data['token'] as String,
-      );
-
-      return data;
+    await _api.saveToken(token);
+    final user = data['user'];
+    if (user is! Map<String, dynamic>) {
+      throw const ApiException(message: 'Data admin pada respons login tidak valid.');
     }
-
-    final message = result['message']?.toString() ??
-        'Login gagal (HTTP ${response.statusCode}).';
-
-    throw Exception(message);
+    return AuthUser.fromJson(user);
   }
 
-  // Mengambil JWT yang tersimpan.
-  Future<String?> getToken() async {
-    return _storage.read(key: _tokenKey);
+  Future<AuthUser> currentUser() async {
+    final result = await _api.get('/auth/me');
+    final data = _requireData(result);
+    return AuthUser.fromJson(data);
   }
 
-  // Menghapus JWT saat logout.
-  Future<void> logout() async {
-    await _storage.delete(key: _tokenKey);
+  Future<void> logout() => _api.clearToken();
+
+  Map<String, dynamic> _requireData(dynamic result) {
+    if (result is! Map<String, dynamic> || result['data'] is! Map) {
+      throw const ApiException(message: 'Format respons API tidak valid.');
+    }
+    return Map<String, dynamic>.from(result['data'] as Map);
   }
 }

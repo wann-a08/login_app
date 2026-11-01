@@ -1,0 +1,2245 @@
+--- a/lib/auth_service.dart
++++ b/lib/services/auth_service.dart
+@@ -1,88 +1,44 @@
++import 'api_client.dart';
++import '../models/auth_user.dart';
+ 
+-import 'dart:convert';
+-import 'package:flutter/foundation.dart';
+-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+-import 'package:http/http.dart' as http;
++// Class untuk login, validasi sesi, dan logout admin.
++class AuthService {
++  final ApiClient _api = ApiClient.instance;
+ 
+-// Class untuk mengelola autentikasi ke REST API.
+-class AuthService {
+-  static const String baseUrl = 'http://localhost:3000/api';
+-
+-  static const FlutterSecureStorage _storage =
+-  FlutterSecureStorage();
+-
+-  static const String _tokenKey = 'auth_token';
+-
+-  // Mengirim username/email dan password ke API login.
+-  Future<Map<String, dynamic>> login({
++  Future<AuthUser> login({
+     required String identifier,
+     required String password,
+   }) async {
+-    final uri = Uri.parse('$baseUrl/auth/login');
+-
+-    final response = await http
+-        .post(
+-      uri,
+-      headers: {
+-        'Content-Type': 'application/json',
+-        'Accept': 'application/json',
+-      },
+-      body: jsonEncode({
+-        'identifier': identifier,
+-        'password': password,
+-      }),
+-    )
+-        .timeout(const Duration(seconds: 15));
+-
+-    final Map<String, dynamic> result;
+-
+-    try {
+-      final decoded = jsonDecode(response.body);
+-
+-      if (decoded is! Map<String, dynamic>) {
+-        throw const FormatException('Format respons API tidak valid.');
+-      }
+-
+-      result = decoded;
+-    } on FormatException {
+-      throw Exception(
+-        'Respons API bukan JSON yang valid '
+-            '(HTTP ${response.statusCode}).',
+-      );
++    final result = await _api.post(
++      '/auth/login',
++      authenticated: false,
++      body: {'identifier': identifier, 'password': password},
++    );
++    final data = _requireData(result);
++    final token = data['token'];
++    if (token is! String || token.isEmpty) {
++      throw const ApiException(message: 'Respons login tidak memuat token yang valid.');
+     }
+-
+-    if (response.statusCode >= 200 &&
+-        response.statusCode < 300 &&
+-        result['success'] == true) {
+-      final data = result['data'];
+-
+-      if (data is! Map<String, dynamic> ||
+-          data['token'] is! String ||
+-          (data['token'] as String).isEmpty) {
+-        throw Exception('Respons login tidak memuat token yang valid.');
+-      }
+-
+-      await _storage.write(
+-        key: _tokenKey,
+-        value: data['token'] as String,
+-      );
+-
+-      return data;
++    await _api.saveToken(token);
++    final user = data['user'];
++    if (user is! Map<String, dynamic>) {
++      throw const ApiException(message: 'Data admin pada respons login tidak valid.');
+     }
+-
+-    final message = result['message']?.toString() ??
+-        'Login gagal (HTTP ${response.statusCode}).';
+-
+-    throw Exception(message);
++    return AuthUser.fromJson(user);
+   }
+ 
+-  // Mengambil JWT yang tersimpan.
+-  Future<String?> getToken() async {
+-    return _storage.read(key: _tokenKey);
++  Future<AuthUser> currentUser() async {
++    final result = await _api.get('/auth/me');
++    final data = _requireData(result);
++    return AuthUser.fromJson(data);
+   }
+ 
+-  // Menghapus JWT saat logout.
+-  Future<void> logout() async {
+-    await _storage.delete(key: _tokenKey);
++  Future<void> logout() => _api.clearToken();
++
++  Map<String, dynamic> _requireData(dynamic result) {
++    if (result is! Map<String, dynamic> || result['data'] is! Map) {
++      throw const ApiException(message: 'Format respons API tidak valid.');
++    }
++    return Map<String, dynamic>.from(result['data'] as Map);
+   }
+ }
+
+--- a/lib/user_service.dart
++++ b/lib/services/user_service.dart
+@@ -1,59 +1,3 @@
+-import 'dart:convert';
+-import 'package:http/http.dart' as http;
+-
+-// Class untuk mengambil data user dan pagination dari REST API.
+-class UserService {
+-  static const String baseUrl = 'http://localhost:3000/api';
+-
+-  Future<Map<String, dynamic>> getUsers({
+-    int page = 1,
+-    int limit = 10,
+-  }) async {
+-    final uri = Uri.parse('$baseUrl/users').replace(
+-      queryParameters: {
+-        'page': page.toString(),
+-        'limit': limit.toString(),
+-      },
+-    );
+-
+-    final response = await http.get(
+-      uri,
+-      headers: {'Accept': 'application/json'},
+-    ).timeout(const Duration(seconds: 10));
+-
+-    final dynamic decoded;
+-
+-    try {
+-      decoded = jsonDecode(response.body);
+-    } on FormatException {
+-      throw Exception('Respons API bukan JSON yang valid.');
+-    }
+-
+-    if (response.statusCode != 200) {
+-      final message = decoded is Map<String, dynamic>
+-          ? decoded['message']?.toString() ?? 'Gagal mengambil data user'
+-          : 'Gagal mengambil data user';
+-
+-      throw Exception(message);
+-    }
+-
+-    if (decoded is! Map<String, dynamic> ||
+-        decoded['success'] != true ||
+-        decoded['data'] is! List ||
+-        decoded['meta'] is! Map<String, dynamic>) {
+-      throw Exception('Format respons API tidak valid.');
+-    }
+-
+-    final meta = decoded['meta'] as Map<String, dynamic>;
+-
+-    return {
+-      'data': (decoded['data'] as List)
+-          .map((user) => Map<String, dynamic>.from(user as Map))
+-          .toList(),
+-      'page': (meta['page'] as num).toInt(),
+-      'limit': (meta['limit'] as num).toInt(),
+-      'total': (meta['total'] as num).toInt(),
+-      'totalPages': (meta['totalPages'] as num).toInt(),
+-    };
+-  }
+-}
++// Kompatibilitas nama service lama sementara layar lama dimigrasikan.
++// Endpoint yang dipakai sekarang adalah /siswa, bukan /users.
++export 'siswa_service.dart' show SiswaService;
+
+--- a/lib/data_page.dart
++++ b/lib/pages/data_page.dart
+@@ -1,8 +1,14 @@
++import 'dart:async';
+ 
+ import 'package:flutter/material.dart';
+-import '../services/user_service.dart';
+-
+-// Class untuk halaman Lihat Data user dari REST API.
++
++import '../models/siswa.dart';
++import '../services/api_client.dart';
++import '../services/siswa_service.dart';
++import 'siswa_detail_page.dart';
++import 'siswa_form_page.dart';
++
++// Halaman daftar siswa dengan pagination, pencarian, filter, dan CRUD.
+ class DataPage extends StatefulWidget {
+   const DataPage({super.key});
+ 
+@@ -11,515 +17,198 @@
+ }
+ 
+ class _DataPageState extends State<DataPage> {
+-  final UserService _userService = UserService();
+-
+-  // Warna utama halaman.
++  final SiswaService _service = SiswaService();
++  final TextEditingController _searchController = TextEditingController();
++  Timer? _debounce;
+   static const Color navy = Color(0xFF172B4D);
+-  static const Color blue = Color(0xFF2563EB);
+   static const Color background = Color(0xFFF4F6FA);
+ 
+-  // Variabel untuk menyimpan data user dan status halaman.
+-  List<Map<String, dynamic>> users = [];
+-
+-  bool isLoading = false;
+-  String? errorMessage;
+-
+-  // Variabel pagination.
+-  int currentPage = 1;
+-  final int limit = 10;
+-  int total = 0;
+-  int totalPages = 1;
++  List<Siswa> _siswa = [];
++  bool _loading = false;
++  String? _error;
++  int _page = 1;
++  final int _limit = 10;
++  int _total = 0;
++  int _totalPages = 1;
++  String? _kelas;
++  String? _jurusan;
++  String? _jenisKelamin;
+ 
+   @override
+   void initState() {
+     super.initState();
+-    loadUsers();
+-  }
+-
+-  // Mengambil data user beserta metadata pagination dari API.
+-  Future<void> loadUsers({int page = 1}) async {
+-    if (isLoading) return;
+-
+-    setState(() {
+-      isLoading = true;
+-      errorMessage = null;
+-    });
+-
++    _load();
++  }
++
++  @override
++  void dispose() {
++    _debounce?.cancel();
++    _searchController.dispose();
++    super.dispose();
++  }
++
++  Future<void> _load({int page = 1}) async {
++    setState(() { _loading = true; _error = null; });
+     try {
+-      final result = await _userService.getUsers(
++      final result = await _service.getSiswa(
+         page: page,
+-        limit: limit,
++        limit: _limit,
++        search: _searchController.text,
++        kelas: _kelas,
++        jurusan: _jurusan,
++        jenisKelamin: _jenisKelamin,
+       );
+-
+       if (!mounted) return;
+-
+       setState(() {
+-        users = result['data'] as List<Map<String, dynamic>>;
+-        currentPage = result['page'] as int;
+-        total = result['total'] as int;
+-        totalPages = result['totalPages'] as int;
++        _siswa = result.data;
++        _page = result.meta.page;
++        _total = result.meta.total;
++        _totalPages = result.meta.totalPages < 1 ? 1 : result.meta.totalPages;
+       });
+-    } catch (error) {
++    } on ApiException catch (error) {
++      if (mounted) setState(() => _error = error.message);
++    } catch (_) {
++      if (mounted) setState(() => _error = 'Gagal memuat data siswa.');
++    } finally {
++      if (mounted) setState(() => _loading = false);
++    }
++  }
++
++  void _searchChanged(String _) {
++    _debounce?.cancel();
++    _debounce = Timer(const Duration(milliseconds: 400), () => _load());
++  }
++
++  Future<void> _openForm({Siswa? siswa}) async {
++    final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => SiswaFormPage(siswa: siswa)));
++    if (mounted && changed == true) _load(page: _page);
++  }
++
++  Future<void> _openDetail(Siswa siswa) async {
++    final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => SiswaDetailPage(siswa: siswa)));
++    if (mounted && changed == true) _load(page: _page);
++  }
++
++  Future<void> _delete(Siswa siswa) async {
++    final confirmed = await showDialog<bool>(
++      context: context,
++      builder: (context) => AlertDialog(
++        title: const Text('Hapus siswa?'),
++        content: Text('Data ${siswa.namaLengkap} (${siswa.nipd}) akan dihapus.'),
++        actions: [
++          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
++          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Hapus')),
++        ],
++      ),
++    );
++    if (confirmed != true) return;
++    try {
++      await _service.delete(siswa.id);
+       if (!mounted) return;
+-
+-      setState(() {
+-        errorMessage = error
+-            .toString()
+-            .replaceFirst('Exception: ', '');
+-      });
+-    } finally {
+-      if (mounted) {
+-        setState(() {
+-          isLoading = false;
+-        });
+-      }
++      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Data siswa berhasil dihapus.')));
++      _load(page: _page);
++    } on ApiException catch (error) {
++      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+     }
+   }
+ 
+-  // Mengambil inisial dari nama user untuk avatar.
+-  String getInitials(String name) {
+-    final trimmedName = name.trim();
+-
+-    if (trimmedName.isEmpty) return '?';
+-
+-    final words = trimmedName.split(RegExp(r'\s+'));
+-
+-    if (words.length == 1) {
+-      return words.first.characters.first.toUpperCase();
+-    }
+-
+-    return '${words.first.characters.first}'
+-            '${words.last.characters.first}'
+-        .toUpperCase();
+-  }
+-
+-  // Membuat warna avatar berdasarkan ID user.
+-  Color getAvatarColor(dynamic id) {
+-    const colors = [
+-      Color(0xFFDBEAFE),
+-      Color(0xFFD1FAE5),
+-      Color(0xFFF3E8FF),
+-      Color(0xFFFFEDD5),
+-      Color(0xFFFFE4E6),
+-    ];
+-
+-    final index = (int.tryParse('$id') ?? 0).abs() % colors.length;
+-    return colors[index];
+-  }
+-
+-  // Membuat warna teks avatar berdasarkan ID user.
+-  Color getAvatarTextColor(dynamic id) {
+-    const colors = [
+-      Color(0xFF2563EB),
+-      Color(0xFF059669),
+-      Color(0xFF9333EA),
+-      Color(0xFFEA580C),
+-      Color(0xFFE11D48),
+-    ];
+-
+-    final index = (int.tryParse('$id') ?? 0).abs() % colors.length;
+-    return colors[index];
+-  }
+-
+-  // Widget satu card user berisi avatar, nama, dan email.
+-  Widget userCard(Map<String, dynamic> user) {
+-    final name = (user['name'] ?? 'Tanpa Nama').toString();
+-    final email = (user['email'] ?? 'Email tidak tersedia').toString();
+-    final id = user['id'];
+-
+-    return Container(
+-      margin: const EdgeInsets.only(bottom: 12),
+-      padding: const EdgeInsets.all(14),
+-      decoration: BoxDecoration(
+-        color: Colors.white,
+-        borderRadius: BorderRadius.circular(16),
+-        border: Border.all(color: const Color(0xFFE8EDF4)),
+-      ),
+-      child: Row(
+-        children: [
+-          // Avatar lingkaran dengan inisial nama.
+-          Container(
+-            width: 52,
+-            height: 52,
+-            alignment: Alignment.center,
+-            decoration: BoxDecoration(
+-              color: getAvatarColor(id),
+-              shape: BoxShape.circle,
+-            ),
+-            child: Text(
+-              getInitials(name),
+-              style: TextStyle(
+-                color: getAvatarTextColor(id),
+-                fontSize: 17,
+-                fontWeight: FontWeight.bold,
+-              ),
+-            ),
+-          ),
+-          const SizedBox(width: 14),
+-
+-          // Nama dan email user.
+-          Expanded(
+-            child: Column(
+-              crossAxisAlignment: CrossAxisAlignment.start,
+-              children: [
+-                Text(
+-                  name,
+-                  maxLines: 1,
+-                  overflow: TextOverflow.ellipsis,
+-                  style: const TextStyle(
+-                    color: navy,
+-                    fontSize: 15,
+-                    fontWeight: FontWeight.w600,
+-                  ),
+-                ),
+-                const SizedBox(height: 5),
+-                Text(
+-                  email,
+-                  maxLines: 2,
+-                  overflow: TextOverflow.ellipsis,
+-                  style: TextStyle(
+-                    color: Colors.grey.shade600,
+-                    fontSize: 12,
+-                  ),
+-                ),
+-              ],
+-            ),
+-          ),
+-          const SizedBox(width: 8),
+-
+-          // Informasi ID user.
+-          Text(
+-            '#$id',
+-            style: TextStyle(
+-              color: Colors.grey.shade400,
+-              fontSize: 11,
+-              fontWeight: FontWeight.w500,
+-            ),
+-          ),
+-        ],
+-      ),
+-    );
+-  }
+-
+-  // Membuat tombol navigasi pagination.
+-  Widget pageButton({
+-    required IconData icon,
+-    required VoidCallback? onPressed,
+-  }) {
+-    return IconButton(
+-      onPressed: isLoading ? null : onPressed,
+-      icon: Icon(icon, size: 20),
+-      style: IconButton.styleFrom(
+-        foregroundColor: navy,
+-        backgroundColor: Colors.white,
+-        disabledForegroundColor: Colors.grey.shade400,
+-        shape: RoundedRectangleBorder(
+-          borderRadius: BorderRadius.circular(10),
+-          side: BorderSide(color: Colors.grey.shade200),
+-        ),
+-      ),
+-    );
++  void _resetFilters() {
++    setState(() { _kelas = null; _jurusan = null; _jenisKelamin = null; });
++    _load();
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final firstItem = total == 0
+-        ? 0
+-        : (currentPage - 1) * limit + 1;
+-
+-    final lastItem = total == 0
+-        ? 0
+-        : ((currentPage * limit) < total
+-            ? currentPage * limit
+-            : total);
+-
+     return Scaffold(
+       backgroundColor: background,
+       appBar: AppBar(
++        title: const Text('Data Siswa'),
+         backgroundColor: navy,
+         foregroundColor: Colors.white,
+-        elevation: 0,
+-        title: const Text(
+-          'Lihat Data',
+-          style: TextStyle(fontWeight: FontWeight.w600),
+-        ),
+-        actions: [
+-          IconButton(
+-            tooltip: 'Muat ulang',
+-            onPressed: isLoading
+-                ? null
+-                : () => loadUsers(page: currentPage),
+-            icon: const Icon(Icons.refresh),
+-          ),
+-          const SizedBox(width: 8),
+-        ],
+-      ),
+-      body: SafeArea(
+-        child: Padding(
+-          padding: const EdgeInsets.all(20),
++        actions: [IconButton(tooltip: 'Muat ulang', onPressed: _loading ? null : () => _load(page: _page), icon: const Icon(Icons.refresh))],
++      ),
++      floatingActionButton: FloatingActionButton.extended(
++        onPressed: () => _openForm(),
++        icon: const Icon(Icons.person_add_alt_1),
++        label: const Text('Tambah Siswa'),
++      ),
++      body: Center(
++        child: ConstrainedBox(
++          constraints: const BoxConstraints(maxWidth: 1100),
+           child: Column(
+-            crossAxisAlignment: CrossAxisAlignment.start,
+             children: [
+-              const Text(
+-                'Daftar User',
+-                style: TextStyle(
+-                  color: navy,
+-                  fontSize: 24,
+-                  fontWeight: FontWeight.bold,
+-                ),
+-              ),
+-              const SizedBox(height: 6),
+-              Text(
+-                'Lihat pengguna yang tersimpan di database.',
+-                style: TextStyle(
+-                  color: Colors.grey.shade600,
+-                  fontSize: 14,
+-                ),
+-              ),
+-              const SizedBox(height: 20),
+-
+-              // Kartu informasi total pengguna.
+-              Container(
+-                width: double.infinity,
+-                padding: const EdgeInsets.all(18),
+-                decoration: BoxDecoration(
+-                  color: Colors.white,
+-                  borderRadius: BorderRadius.circular(16),
+-                  border: Border.all(color: Colors.grey.shade200),
+-                ),
+-                child: Row(
++              Padding(
++                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
++                child: Column(
+                   children: [
+-                    Container(
+-                      width: 48,
+-                      height: 48,
+-                      decoration: BoxDecoration(
+-                        color: blue.withValues(alpha: 0.10),
+-                        borderRadius: BorderRadius.circular(12),
+-                      ),
+-                      child: const Icon(
+-                        Icons.people_alt_outlined,
+-                        color: blue,
+-                        size: 26,
++                    TextField(
++                      controller: _searchController,
++                      onChanged: _searchChanged,
++                      decoration: InputDecoration(
++                        labelText: 'Cari nama atau NIPD',
++                        prefixIcon: const Icon(Icons.search),
++                        suffixIcon: IconButton(icon: const Icon(Icons.clear), onPressed: () { _searchController.clear(); _searchChanged(''); }),
++                        border: const OutlineInputBorder(),
+                       ),
+                     ),
+-                    const SizedBox(width: 14),
+-                    Expanded(
+-                      child: Column(
+-                        crossAxisAlignment: CrossAxisAlignment.start,
+-                        children: [
+-                          Text(
+-                            'Total Pengguna',
+-                            style: TextStyle(
+-                              color: Colors.grey.shade600,
+-                              fontSize: 13,
+-                            ),
+-                          ),
+-                          const SizedBox(height: 4),
+-                          Text(
+-                            '$total',
+-                            style: const TextStyle(
+-                              color: navy,
+-                              fontSize: 23,
+-                              fontWeight: FontWeight.bold,
+-                            ),
+-                          ),
+-                        ],
+-                      ),
++                    const SizedBox(height: 10),
++                    Wrap(
++                      spacing: 10,
++                      runSpacing: 10,
++                      children: [
++                        _filter<String>('Kelas', _kelas, SiswaOptions.kelas.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), (v) { setState(() => _kelas = v); _load(); }),
++                        _filter<String>('Jurusan', _jurusan, SiswaOptions.jurusan.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), (v) { setState(() => _jurusan = v); _load(); }),
++                        _filter<String>('Jenis kelamin', _jenisKelamin, SiswaOptions.jenisKelamin.map((v) => DropdownMenuItem(value: v, child: Text(v == 'L' ? 'Laki-laki' : 'Perempuan'))).toList(), (v) { setState(() => _jenisKelamin = v); _load(); }),
++                        OutlinedButton.icon(onPressed: _resetFilters, icon: const Icon(Icons.filter_alt_off), label: const Text('Reset filter')),
++                      ],
+                     ),
+-                    const Icon(
+-                      Icons.storage_outlined,
+-                      color: blue,
+-                      size: 24,
+-                    ),
++                    const SizedBox(height: 8),
++                    Align(alignment: Alignment.centerLeft, child: Text('Total siswa: $_total')),
+                   ],
+                 ),
+               ),
+-              const SizedBox(height: 20),
+-
+-              // Area daftar user dan pagination.
++              if (_loading) const LinearProgressIndicator(),
++              if (_error != null)
++                Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: const TextStyle(color: Colors.red))),
+               Expanded(
+-                child: Container(
+-                  width: double.infinity,
+-                  padding: const EdgeInsets.all(14),
+-                  decoration: BoxDecoration(
+-                    color: Colors.white,
+-                    borderRadius: BorderRadius.circular(16),
+-                    border: Border.all(color: Colors.grey.shade200),
+-                  ),
+-                  child: Column(
+-                    crossAxisAlignment: CrossAxisAlignment.start,
+-                    children: [
+-                      // Judul daftar user.
+-                      Padding(
+-                        padding: const EdgeInsets.only(
+-                          left: 2,
+-                          right: 2,
+-                          bottom: 14,
+-                        ),
+-                        child: Row(
+-                          children: [
+-                            const Expanded(
+-                              child: Text(
+-                                'Data Pengguna',
+-                                style: TextStyle(
+-                                  color: navy,
+-                                  fontSize: 16,
+-                                  fontWeight: FontWeight.bold,
+-                                ),
+-                              ),
+-                            ),
+-                            Text(
+-                              '$total data',
+-                              style: TextStyle(
+-                                color: Colors.grey.shade600,
+-                                fontSize: 12,
+-                              ),
+-                            ),
+-                          ],
+-                        ),
+-                      ),
+-
+-                      // Menampilkan loading, error, data, atau kondisi kosong.
+-                      Expanded(
+-                        child: Builder(
+-                          builder: (context) {
+-                            if (isLoading && users.isEmpty) {
+-                              return const Center(
+-                                child: CircularProgressIndicator(
+-                                  color: blue,
+-                                ),
+-                              );
+-                            }
+-
+-                            if (errorMessage != null && users.isEmpty) {
+-                              return Center(
+-                                child: Padding(
+-                                  padding: const EdgeInsets.all(20),
+-                                  child: Column(
+-                                    mainAxisSize: MainAxisSize.min,
+-                                    children: [
+-                                      const Icon(
+-                                        Icons.error_outline,
+-                                        color: Colors.red,
+-                                        size: 40,
+-                                      ),
+-                                      const SizedBox(height: 10),
+-                                      Text(
+-                                        errorMessage!,
+-                                        textAlign: TextAlign.center,
+-                                      ),
+-                                      const SizedBox(height: 12),
+-                                      ElevatedButton(
+-                                        onPressed: () =>
+-                                            loadUsers(page: currentPage),
+-                                        child: const Text('Coba Lagi'),
+-                                      ),
++                child: _loading && _siswa.isEmpty
++                    ? const Center(child: CircularProgressIndicator())
++                    : _siswa.isEmpty
++                        ? const Center(child: Text('Data siswa tidak ditemukan.'))
++                        : ListView.separated(
++                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
++                            itemCount: _siswa.length,
++                            separatorBuilder: (_, __) => const SizedBox(height: 8),
++                            itemBuilder: (context, index) {
++                              final siswa = _siswa[index];
++                              return Card(
++                                child: ListTile(
++                                  onTap: () => _openDetail(siswa),
++                                  leading: CircleAvatar(backgroundColor: const Color(0xFFDBEAFE), child: Text(siswa.namaLengkap.isEmpty ? '?' : siswa.namaLengkap.characters.first.toUpperCase())),
++                                  title: Text(siswa.namaLengkap, style: const TextStyle(fontWeight: FontWeight.w600)),
++                                  subtitle: Text('NIPD: ${siswa.nipd} • Kelas ${siswa.kelas} ${siswa.jurusan}\n${siswa.jenisKelamin == 'L' ? 'Laki-laki' : 'Perempuan'}'),
++                                  isThreeLine: true,
++                                  trailing: PopupMenuButton<String>(
++                                    onSelected: (value) { if (value == 'edit') _openForm(siswa: siswa); if (value == 'delete') _delete(siswa); },
++                                    itemBuilder: (_) => const [
++                                      PopupMenuItem(value: 'edit', child: Text('Edit')),
++                                      PopupMenuItem(value: 'delete', child: Text('Hapus')),
+                                     ],
+                                   ),
+                                 ),
+                               );
+-                            }
+-
+-                            if (users.isEmpty) {
+-                              return const Center(
+-                                child: Text(
+-                                  'Belum ada data pengguna.',
+-                                ),
+-                              );
+-                            }
+-
+-                            return Stack(
+-                              children: [
+-                                // Daftar card yang bisa di-scroll.
+-                                ListView.builder(
+-                                  itemCount: users.length,
+-                                  itemBuilder: (context, index) {
+-                                    return userCard(users[index]);
+-                                  },
+-                                ),
+-
+-                                // Indikator saat memuat halaman berikutnya.
+-                                if (isLoading)
+-                                  const Align(
+-                                    alignment: Alignment.topCenter,
+-                                    child: LinearProgressIndicator(
+-                                      color: blue,
+-                                      minHeight: 3,
+-                                    ),
+-                                  ),
+-                              ],
+-                            );
+-                          },
+-                        ),
+-                      ),
+-
+-                      Divider(
+-                        height: 1,
+-                        color: Colors.grey.shade200,
+-                      ),
+-
+-                      // Kontrol pagination tetap dipertahankan.
+-                      Padding(
+-                        padding: const EdgeInsets.only(top: 10),
+-                        child: Wrap(
+-                          alignment: WrapAlignment.spaceBetween,
+-                          crossAxisAlignment: WrapCrossAlignment.center,
+-                          spacing: 12,
+-                          runSpacing: 8,
+-                          children: [
+-                            Text(
+-                              'Menampilkan $firstItem–$lastItem dari $total',
+-                              style: TextStyle(
+-                                color: Colors.grey.shade600,
+-                                fontSize: 12,
+-                              ),
+-                            ),
+-                            Row(
+-                              mainAxisSize: MainAxisSize.min,
+-                              children: [
+-                                pageButton(
+-                                  icon: Icons.chevron_left,
+-                                  onPressed: currentPage > 1
+-                                      ? () => loadUsers(
+-                                            page: currentPage - 1,
+-                                          )
+-                                      : null,
+-                                ),
+-                                const SizedBox(width: 8),
+-                                Container(
+-                                  padding: const EdgeInsets.symmetric(
+-                                    horizontal: 14,
+-                                    vertical: 10,
+-                                  ),
+-                                  decoration: BoxDecoration(
+-                                    color: blue,
+-                                    borderRadius: BorderRadius.circular(10),
+-                                  ),
+-                                  child: Text(
+-                                    '$currentPage / $totalPages',
+-                                    style: const TextStyle(
+-                                      color: Colors.white,
+-                                      fontWeight: FontWeight.w600,
+-                                      fontSize: 12,
+-                                    ),
+-                                  ),
+-                                ),
+-                                const SizedBox(width: 8),
+-                                pageButton(
+-                                  icon: Icons.chevron_right,
+-                                  onPressed: currentPage < totalPages
+-                                      ? () => loadUsers(
+-                                            page: currentPage + 1,
+-                                          )
+-                                      : null,
+-                                ),
+-                              ],
+-                            ),
+-                          ],
+-                        ),
+-                      ),
+-                    ],
+-                  ),
++                            },
++                          ),
++              ),
++              Padding(
++                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
++                child: Row(
++                  mainAxisAlignment: MainAxisAlignment.center,
++                  children: [
++                    IconButton(onPressed: !_loading || _page > 1 ? () => _load(page: _page - 1) : null, icon: const Icon(Icons.chevron_left)),
++                    Text('Halaman $_page dari $_totalPages'),
++                    IconButton(onPressed: !_loading && _page < _totalPages ? () => _load(page: _page + 1) : null, icon: const Icon(Icons.chevron_right)),
++                  ],
+                 ),
+               ),
+             ],
+@@ -528,4 +217,16 @@
+       ),
+     );
+   }
++
++  Widget _filter<T>(String label, T? value, List<DropdownMenuItem<T>> items, ValueChanged<T?> onChanged) {
++    return SizedBox(
++      width: 160,
++      child: DropdownButtonFormField<T>(
++        value: value,
++        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), isDense: true),
++        items: [DropdownMenuItem<T>(value: null, child: Text('Semua $label')), ...items],
++        onChanged: onChanged,
++      ),
++    );
++  }
+ }
+
+--- a/lib/home_input.dart
++++ b/lib/pages/home_input.dart
+@@ -1,6 +1,6 @@
+ import 'package:flutter/material.dart';
+ 
+-// Class untuk halaman pilihan input data.
++// Halaman pilihan input siswa dan petunjuk penambahan akun admin.
+ class HomeInputPage extends StatelessWidget {
+   const HomeInputPage({super.key});
+ 
+@@ -8,15 +8,25 @@
+   static const Color blue = Color(0xFF2563EB);
+   static const Color background = Color(0xFFF4F6FA);
+ 
++  void _showAdminInfo(BuildContext context) {
++    showDialog<void>(
++      context: context,
++      builder: (context) => AlertDialog(
++        title: const Text('Input Admin'),
++        content: const Text(
++          'Pembuatan akun admin dilakukan melalui mekanisme administrasi yang sudah tersedia di luar aplikasi (misalnya melalui database atau terminal). '
++          'Backend tidak menyediakan registrasi publik, sehingga aplikasi tidak membuat akun admin melalui endpoint register.',
++        ),
++        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Mengerti'))],
++      ),
++    );
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     return Scaffold(
+       backgroundColor: background,
+-      appBar: AppBar(
+-        title: const Text('Input Data'),
+-        backgroundColor: navy,
+-        foregroundColor: Colors.white,
+-      ),
++      appBar: AppBar(title: const Text('Input Data'), backgroundColor: navy, foregroundColor: Colors.white),
+       body: Center(
+         child: Padding(
+           padding: const EdgeInsets.all(24),
+@@ -26,59 +36,22 @@
+               mainAxisSize: MainAxisSize.min,
+               crossAxisAlignment: CrossAxisAlignment.stretch,
+               children: [
+-                const Text(
+-                  'Pilih Jenis Input',
+-                  textAlign: TextAlign.center,
+-                  style: TextStyle(
+-                    fontSize: 24,
+-                    fontWeight: FontWeight.bold,
+-                    color: navy,
+-                  ),
+-                ),
++                const Text('Pilih Jenis Input', textAlign: TextAlign.center, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: navy)),
+                 const SizedBox(height: 8),
+-                Text(
+-                  'Pilih data yang ingin ditambahkan.',
+-                  textAlign: TextAlign.center,
+-                  style: TextStyle(
+-                    fontSize: 14,
+-                    color: Colors.grey.shade600,
+-                  ),
+-                ),
++                Text('Pilih data yang ingin dikelola.', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
+                 const SizedBox(height: 28),
+-
+-                // Tombol untuk menuju halaman input user.
+                 ElevatedButton.icon(
+-                  onPressed: () {
+-                    Navigator.pushNamed(context, '/input-user');
+-                  },
++                  onPressed: () => Navigator.pushNamed(context, '/siswa-form'),
+                   icon: const Icon(Icons.person_add_alt_1),
+-                  label: const Text('Input User'),
+-                  style: ElevatedButton.styleFrom(
+-                    backgroundColor: blue,
+-                    foregroundColor: Colors.white,
+-                    padding: const EdgeInsets.symmetric(vertical: 18),
+-                    shape: RoundedRectangleBorder(
+-                      borderRadius: BorderRadius.circular(12),
+-                    ),
+-                  ),
++                  label: const Text('Input Siswa'),
++                  style: ElevatedButton.styleFrom(backgroundColor: blue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 18), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                 ),
+                 const SizedBox(height: 16),
+-
+-                // Tombol untuk menuju halaman input account.
+                 ElevatedButton.icon(
+-                  onPressed: () {
+-                    Navigator.pushNamed(context, '/input-account');
+-                  },
++                  onPressed: () => _showAdminInfo(context),
+                   icon: const Icon(Icons.manage_accounts_outlined),
+-                  label: const Text('Input Account'),
+-                  style: ElevatedButton.styleFrom(
+-                    backgroundColor: navy,
+-                    foregroundColor: Colors.white,
+-                    padding: const EdgeInsets.symmetric(vertical: 18),
+-                    shape: RoundedRectangleBorder(
+-                      borderRadius: BorderRadius.circular(12),
+-                    ),
+-                  ),
++                  label: const Text('Input Admin'),
++                  style: ElevatedButton.styleFrom(backgroundColor: navy, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 18), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                 ),
+               ],
+             ),
+@@ -87,4 +60,4 @@
+       ),
+     );
+   }
+-}+}
+
+--- a/lib/home_page.dart
++++ b/lib/pages/home_page.dart
+@@ -1,9 +1,11 @@
+ 
+ import 'package:flutter/material.dart';
++import '../core/app_session.dart';
+ 
+ // Class untuk halaman Home dan dashboard admin.
+ class HomePage extends StatelessWidget {
+-  const HomePage({super.key});
++  final AppSession session;
++  const HomePage({super.key, required this.session});
+ 
+   static const Color navy = Color(0xFF172B4D);
+   static const Color blue = Color(0xFF2563EB);
+@@ -119,12 +121,11 @@
+                           description: 'Keluar dari dashboard admin',
+                           icon: Icons.logout,
+                           color: const Color(0xFFDC2626),
+-                          onTap: () {
+-                            Navigator.pushNamedAndRemoveUntil(
+-                              context,
+-                              '/',
+-                                  (route) => false,
+-                            );
++                          onTap: () async {
++                            await session.logout();
++                            if (context.mounted) {
++                              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
++                            }
+                           },
+                         ),
+                       ],
+
+--- a/lib/login_page.dart
++++ b/lib/pages/login_page.dart
+@@ -1,317 +1,120 @@
++import 'package:flutter/material.dart';
+ 
+-import 'package:flutter/material.dart';
+-import '../services/auth_service.dart';
++import '../core/app_session.dart';
++import '../services/api_client.dart';
+ 
+-// Class untuk halaman Login.
++// Halaman login admin; tidak menyediakan registrasi publik.
+ class LoginPage extends StatefulWidget {
+-  const LoginPage({super.key});
++  final AppSession session;
++  const LoginPage({super.key, required this.session});
+ 
+   @override
+   State<LoginPage> createState() => _LoginPageState();
+ }
+ 
+-// Class untuk mengatur state dan isi halaman Login.
+ class _LoginPageState extends State<LoginPage> {
+   final _formKey = GlobalKey<FormState>();
++  final _identifier = TextEditingController();
++  final _password = TextEditingController();
++  bool _loading = false;
++  bool _obscure = true;
+ 
+-  final TextEditingController usernameController =
+-  TextEditingController();
+-  final TextEditingController passwordController =
+-  TextEditingController();
++  @override
++  void dispose() {
++    _identifier.dispose();
++    _password.dispose();
++    super.dispose();
++  }
+ 
+-  final AuthService _authService = AuthService();
+-
+-  bool _obscurePassword = true;
+-  bool _isLoading = false;
+-
+-  static const Color navy = Color(0xFF172B4D);
+-  static const Color blue = Color(0xFF2563EB);
+-  static const Color background = Color(0xFFF4F6FA);
+-
+-  Future<void> login() async {
+-    if (!_formKey.currentState!.validate() || _isLoading) {
+-      return;
+-    }
+-
+-    setState(() {
+-      _isLoading = true;
+-    });
+-
++  Future<void> _login() async {
++    if (!_formKey.currentState!.validate() || _loading) return;
++    setState(() => _loading = true);
+     try {
+-      await _authService.login(
+-        identifier: usernameController.text.trim(),
+-        password: passwordController.text,
++      await widget.session.login(
++        identifier: _identifier.text.trim(),
++        password: _password.text,
+       );
+-
++      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
++    } on ApiException catch (error) {
+       if (!mounted) return;
+-
+-      Navigator.pushNamedAndRemoveUntil(
+-        context,
+-        '/home',
+-            (route) => false,
+-      );
+-    } catch (error) {
+-      if (!mounted) return;
+-
+-      final message = error.toString().replaceFirst('Exception: ', '');
+-
+-      ScaffoldMessenger.of(context).showSnackBar(
+-        SnackBar(
+-          content: Text(message),
+-          backgroundColor: Colors.red.shade700,
+-        ),
+-      );
++      final message = error.statusCode == 401
++          ? 'Username/email atau password salah.'
++          : error.statusCode == 429
++              ? 'Terlalu banyak percobaan login. Coba lagi beberapa saat.'
++              : error.message;
++      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.red.shade700));
++    } catch (_) {
++      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login gagal. Periksa koneksi dan server.')));
+     } finally {
+-      if (mounted) {
+-        setState(() {
+-          _isLoading = false;
+-        });
+-      }
++      if (mounted) setState(() => _loading = false);
+     }
+   }
+ 
+   @override
+-  void dispose() {
+-    usernameController.dispose();
+-    passwordController.dispose();
+-    super.dispose();
+-  }
+-
+-  @override
+   Widget build(BuildContext context) {
++    const navy = Color(0xFF172B4D);
++    const background = Color(0xFFF4F6FA);
+     return Scaffold(
+       backgroundColor: background,
+       body: SafeArea(
+-        child: SingleChildScrollView(
+-          child: Column(
+-            children: [
+-              Container(
+-                width: double.infinity,
+-                padding: const EdgeInsets.fromLTRB(28, 35, 28, 45),
+-                decoration: const BoxDecoration(
+-                  color: navy,
+-                  borderRadius: BorderRadius.only(
+-                    bottomLeft: Radius.circular(35),
+-                    bottomRight: Radius.circular(35),
+-                  ),
+-                ),
+-                child: const Column(
+-                  crossAxisAlignment: CrossAxisAlignment.start,
+-                  children: [
+-                    Row(
++        child: Center(
++          child: SingleChildScrollView(
++            padding: const EdgeInsets.all(24),
++            child: ConstrainedBox(
++              constraints: const BoxConstraints(maxWidth: 440),
++              child: Card(
++                elevation: 2,
++                child: Padding(
++                  padding: const EdgeInsets.all(28),
++                  child: Form(
++                    key: _formKey,
++                    child: Column(
++                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                       children: [
+-                        Icon(
+-                          Icons.school_rounded,
+-                          color: Colors.white,
+-                          size: 30,
++                        const Icon(Icons.school_rounded, size: 48, color: navy),
++                        const SizedBox(height: 12),
++                        const Text('SCHOOL ADMIN', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: navy)),
++                        const SizedBox(height: 8),
++                        const Text('Login untuk melanjutkan ke dashboard.', textAlign: TextAlign.center),
++                        if (widget.session.sessionExpired) ...[
++                          const SizedBox(height: 16),
++                          const Text('Sesi habis. Silakan login kembali.', style: TextStyle(color: Colors.red), textAlign: TextAlign.center),
++                        ],
++                        const SizedBox(height: 24),
++                        TextFormField(
++                          controller: _identifier,
++                          decoration: const InputDecoration(labelText: 'Username atau email', prefixIcon: Icon(Icons.person_outline), border: OutlineInputBorder()),
++                          textInputAction: TextInputAction.next,
++                          validator: (v) => v == null || v.trim().isEmpty ? 'Username/email wajib diisi.' : null,
+                         ),
+-                        SizedBox(width: 10),
+-                        Text(
+-                          'SCHOOL ADMIN',
+-                          style: TextStyle(
+-                            color: Colors.white,
+-                            fontWeight: FontWeight.bold,
+-                            letterSpacing: 1.2,
+-                            fontSize: 16,
++                        const SizedBox(height: 16),
++                        TextFormField(
++                          controller: _password,
++                          obscureText: _obscure,
++                          decoration: InputDecoration(
++                            labelText: 'Password',
++                            prefixIcon: const Icon(Icons.lock_outline),
++                            border: const OutlineInputBorder(),
++                            suffixIcon: IconButton(icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined), onPressed: () => setState(() => _obscure = !_obscure)),
+                           ),
++                          onFieldSubmitted: (_) => _login(),
++                          validator: (v) => v == null || v.isEmpty ? 'Password wajib diisi.' : null,
++                        ),
++                        const SizedBox(height: 24),
++                        FilledButton(
++                          onPressed: _loading ? null : _login,
++                          style: FilledButton.styleFrom(backgroundColor: navy, padding: const EdgeInsets.symmetric(vertical: 16)),
++                          child: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Login'),
+                         ),
+                       ],
+-                    ),
+-                    SizedBox(height: 35),
+-                    Text(
+-                      'Selamat Datang!',
+-                      style: TextStyle(
+-                        color: Colors.white,
+-                        fontSize: 28,
+-                        fontWeight: FontWeight.bold,
+-                      ),
+-                    ),
+-                    SizedBox(height: 10),
+-                    Text(
+-                      'Silakan masuk untuk mengelola\ninformasi sekolah Anda.',
+-                      style: TextStyle(
+-                        color: Color(0xFFD5DEED),
+-                        fontSize: 15,
+-                        height: 1.5,
+-                      ),
+-                    ),
+-                  ],
+-                ),
+-              ),
+-              Padding(
+-                padding: const EdgeInsets.fromLTRB(24, 30, 24, 24),
+-                child: Center(
+-                  child: ConstrainedBox(
+-                    constraints: const BoxConstraints(maxWidth: 450),
+-                    child: Form(
+-                      key: _formKey,
+-                      child: Column(
+-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+-                        children: [
+-                          const Text(
+-                            'Login Akun',
+-                            style: TextStyle(
+-                              color: navy,
+-                              fontSize: 22,
+-                              fontWeight: FontWeight.bold,
+-                            ),
+-                          ),
+-                          const SizedBox(height: 8),
+-                          const Text(
+-                            'Masukkan username atau email dan password.',
+-                            style: TextStyle(
+-                              color: Colors.black54,
+-                              fontSize: 14,
+-                            ),
+-                          ),
+-                          const SizedBox(height: 28),
+-                          const Text(
+-                            'Username atau Email',
+-                            style: TextStyle(
+-                              color: navy,
+-                              fontWeight: FontWeight.w600,
+-                            ),
+-                          ),
+-                          const SizedBox(height: 10),
+-                          TextFormField(
+-                            controller: usernameController,
+-                            textInputAction: TextInputAction.next,
+-                            decoration: _inputDecoration(
+-                              hint: 'Masukkan username atau email',
+-                              icon: Icons.person_outline_rounded,
+-                            ),
+-                            validator: (value) {
+-                              if (value == null || value.trim().isEmpty) {
+-                                return 'Username atau email wajib diisi';
+-                              }
+-                              return null;
+-                            },
+-                          ),
+-                          const SizedBox(height: 22),
+-                          const Text(
+-                            'Password',
+-                            style: TextStyle(
+-                              color: navy,
+-                              fontWeight: FontWeight.w600,
+-                            ),
+-                          ),
+-                          const SizedBox(height: 10),
+-                          TextFormField(
+-                            controller: passwordController,
+-                            obscureText: _obscurePassword,
+-                            textInputAction: TextInputAction.done,
+-                            onFieldSubmitted: (_) => login(),
+-                            decoration: _inputDecoration(
+-                              hint: 'Masukkan password',
+-                              icon: Icons.lock_outline_rounded,
+-                            ).copyWith(
+-                              suffixIcon: IconButton(
+-                                onPressed: () {
+-                                  setState(() {
+-                                    _obscurePassword = !_obscurePassword;
+-                                  });
+-                                },
+-                                icon: Icon(
+-                                  _obscurePassword
+-                                      ? Icons.visibility_outlined
+-                                      : Icons.visibility_off_outlined,
+-                                  color: Colors.black54,
+-                                ),
+-                              ),
+-                            ),
+-                            validator: (value) {
+-                              if (value == null || value.isEmpty) {
+-                                return 'Password wajib diisi';
+-                              }
+-                              return null;
+-                            },
+-                          ),
+-                          const SizedBox(height: 30),
+-                          SizedBox(
+-                            height: 55,
+-                            child: ElevatedButton(
+-                              onPressed: _isLoading ? null : login,
+-                              style: ElevatedButton.styleFrom(
+-                                backgroundColor: blue,
+-                                foregroundColor: Colors.white,
+-                                disabledBackgroundColor:
+-                                blue.withValues(alpha: 0.6),
+-                                elevation: 2,
+-                                shape: RoundedRectangleBorder(
+-                                  borderRadius: BorderRadius.circular(15),
+-                                ),
+-                              ),
+-                              child: _isLoading
+-                                  ? const SizedBox(
+-                                width: 23,
+-                                height: 23,
+-                                child: CircularProgressIndicator(
+-                                  strokeWidth: 2.5,
+-                                  color: Colors.white,
+-                                ),
+-                              )
+-                                  : const Row(
+-                                mainAxisAlignment:
+-                                MainAxisAlignment.center,
+-                                children: [
+-                                  Text(
+-                                    'Login Sekarang',
+-                                    style: TextStyle(
+-                                      fontSize: 16,
+-                                      fontWeight: FontWeight.bold,
+-                                    ),
+-                                  ),
+-                                  SizedBox(width: 10),
+-                                  Icon(Icons.arrow_forward_rounded),
+-                                ],
+-                              ),
+-                            ),
+-                          ),
+-                          const SizedBox(height: 35),
+-                          const Center(
+-                            child: Text(
+-                              'Sistem Informasi Sekolah',
+-                              style: TextStyle(
+-                                color: Colors.black45,
+-                                fontSize: 12,
+-                              ),
+-                            ),
+-                          ),
+-                        ],
+-                      ),
+                     ),
+                   ),
+                 ),
+               ),
+-            ],
++            ),
+           ),
+         ),
+       ),
+     );
+   }
+-
+-  InputDecoration _inputDecoration({
+-    required String hint,
+-    required IconData icon,
+-  }) {
+-    return InputDecoration(
+-      hintText: hint,
+-      prefixIcon: Icon(icon, color: blue),
+-      filled: true,
+-      fillColor: Colors.white,
+-      contentPadding: const EdgeInsets.symmetric(vertical: 17),
+-      border: OutlineInputBorder(
+-        borderRadius: BorderRadius.circular(15),
+-        borderSide: const BorderSide(color: Color(0xFFE1E6EF)),
+-      ),
+-      enabledBorder: OutlineInputBorder(
+-        borderRadius: BorderRadius.circular(15),
+-        borderSide: const BorderSide(color: Color(0xFFE1E6EF)),
+-      ),
+-      focusedBorder: OutlineInputBorder(
+-        borderRadius: BorderRadius.circular(15),
+-        borderSide: const BorderSide(color: blue, width: 1.5),
+-      ),
+-    );
+-  }
+ }
+
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -1,30 +1,97 @@
+ import 'package:flutter/material.dart';
+-import 'pages/login_page.dart';
+-import 'pages/home_page.dart';
++
++import 'core/app_navigator.dart';
++import 'core/app_session.dart';
+ import 'pages/data_page.dart';
+ import 'pages/home_input.dart';
++import 'pages/home_page.dart';
++import 'pages/login_page.dart';
++import 'pages/siswa_form_page.dart';
+ 
+ // Class utama aplikasi.
+ void main() {
+-  runApp(const MyApp());
++  runApp(MyApp(session: AppSession()));
+ }
+ 
+-// Class untuk mengatur aplikasi dan routing.
++// Class untuk mengatur aplikasi, pemulihan sesi, dan route guard.
+ class MyApp extends StatelessWidget {
+-  const MyApp({super.key});
++  final AppSession session;
++  const MyApp({super.key, required this.session});
+ 
+   @override
+   Widget build(BuildContext context) {
+     return MaterialApp(
+-      title: 'Login App',
+-      initialRoute: '/',
+-      routes: {
+-        '/': (context) => const LoginPage(),
+-        '/home': (context) => const HomePage(),
+-        '/data': (context) => const DataPage(),
+-        '/inputdata': (context) => const HomeInputPage(),
+-
++      title: 'School Admin',
++      navigatorKey: appNavigatorKey,
++      debugShowCheckedModeBanner: false,
++      initialRoute: '/startup',
++      onGenerateRoute: (settings) {
++        final path = settings.name ?? '/';
++        if (path == '/startup') {
++          return MaterialPageRoute(builder: (_) => _StartupPage(session: session), settings: settings);
++        }
++        if (path == '/') {
++          return MaterialPageRoute(
++            builder: (_) => session.isAuthenticated
++                ? HomePage(session: session)
++                : LoginPage(session: session),
++            settings: settings,
++          );
++        }
++        if (!session.isAuthenticated) {
++          return MaterialPageRoute(builder: (_) => LoginPage(session: session), settings: settings);
++        }
++        switch (path) {
++          case '/home':
++            return MaterialPageRoute(builder: (_) => HomePage(session: session), settings: settings);
++          case '/data':
++            return MaterialPageRoute(builder: (_) => const DataPage(), settings: settings);
++          case '/inputdata':
++            return MaterialPageRoute(builder: (_) => const HomeInputPage(), settings: settings);
++          case '/siswa-form':
++            return MaterialPageRoute(builder: (_) => const SiswaFormPage(), settings: settings);
++          default:
++            return MaterialPageRoute(
++              builder: (_) => Scaffold(
++                appBar: AppBar(title: const Text('Halaman tidak ditemukan')),
++                body: const Center(child: Text('Halaman yang diminta tidak tersedia.')),
++              ),
++              settings: settings,
++            );
++        }
+       },
+     );
+   }
+-}+}
++
++// Memeriksa token tersimpan sebelum menampilkan halaman utama.
++class _StartupPage extends StatefulWidget {
++  final AppSession session;
++  const _StartupPage({required this.session});
++
++  @override
++  State<_StartupPage> createState() => _StartupPageState();
++}
++
++class _StartupPageState extends State<_StartupPage> {
++  @override
++  void initState() {
++    super.initState();
++    _restoreSession();
++  }
++
++  Future<void> _restoreSession() async {
++    await widget.session.restore();
++    if (!mounted) return;
++    Navigator.pushNamedAndRemoveUntil(
++      context,
++      widget.session.isAuthenticated ? '/home' : '/',
++      (_) => false,
++    );
++  }
++
++  @override
++  Widget build(BuildContext context) => const Scaffold(
++        body: Center(child: CircularProgressIndicator()),
++      );
++}
+
+--- /dev/null
++++ b/lib/core/app_navigator.dart
+@@ -0,0 +1,4 @@
++import 'package:flutter/material.dart';
++
++// Navigator global untuk mengalihkan sesi tanpa BuildContext di lapisan data.
++final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+--- /dev/null
++++ b/lib/core/app_session.dart
+@@ -0,0 +1,58 @@
++import 'package:flutter/foundation.dart';
++
++import '../models/auth_user.dart';
++import '../services/api_client.dart';
++import '../services/auth_service.dart';
++import 'app_navigator.dart';
++
++// State sesi aplikasi; lapisan API dapat memberi tahu saat menerima HTTP 401.
++class AppSession extends ChangeNotifier {
++  AppSession() {
++    ApiClient.instance.onUnauthorized = _onUnauthorized;
++  }
++
++  final AuthService _auth = AuthService();
++  AuthUser? user;
++  bool isChecking = true;
++  bool get isAuthenticated => user != null;
++  bool sessionExpired = false;
++
++  Future<void> restore() async {
++    isChecking = true;
++    notifyListeners();
++    try {
++      final token = await ApiClient.instance.readToken();
++      if (token == null || token.isEmpty) {
++        user = null;
++      } else {
++        user = await _auth.currentUser();
++      }
++    } catch (_) {
++      await ApiClient.instance.clearToken();
++      user = null;
++    } finally {
++      isChecking = false;
++      notifyListeners();
++    }
++  }
++
++  Future<void> login({required String identifier, required String password}) async {
++    user = await _auth.login(identifier: identifier, password: password);
++    sessionExpired = false;
++    notifyListeners();
++  }
++
++  Future<void> logout() async {
++    await _auth.logout();
++    user = null;
++    sessionExpired = false;
++    notifyListeners();
++  }
++
++  void _onUnauthorized() {
++    user = null;
++    sessionExpired = true;
++    notifyListeners();
++    appNavigatorKey.currentState?.pushNamedAndRemoveUntil('/', (route) => false);
++  }
++}
+
+--- /dev/null
++++ b/lib/models/auth_user.dart
+@@ -0,0 +1,27 @@
++// Model untuk data admin yang dikembalikan API autentikasi.
++class AuthUser {
++  final int id;
++  final String username;
++  final String? email;
++  final DateTime? createdAt;
++  final DateTime? updatedAt;
++
++  const AuthUser({
++    required this.id,
++    required this.username,
++    this.email,
++    this.createdAt,
++    this.updatedAt,
++  });
++
++  factory AuthUser.fromJson(Map<String, dynamic> json) => AuthUser(
++        id: (json['id'] as num).toInt(),
++        username: json['username']?.toString() ?? '',
++        email: json['email']?.toString(),
++        createdAt: _date(json['created_at']),
++        updatedAt: _date(json['updated_at']),
++      );
++
++  static DateTime? _date(dynamic value) =>
++      value == null ? null : DateTime.parse(value.toString()).toLocal();
++}
+
+--- /dev/null
++++ b/lib/models/paginated_result.dart
+@@ -0,0 +1,29 @@
++// Metadata pagination sesuai respons endpoint GET /siswa.
++class PaginationMeta {
++  final int page;
++  final int limit;
++  final int total;
++  final int totalPages;
++
++  const PaginationMeta({
++    required this.page,
++    required this.limit,
++    required this.total,
++    required this.totalPages,
++  });
++
++  factory PaginationMeta.fromJson(Map<String, dynamic> json) =>
++      PaginationMeta(
++        page: (json['page'] as num).toInt(),
++        limit: (json['limit'] as num).toInt(),
++        total: (json['total'] as num).toInt(),
++        totalPages: (json['totalPages'] as num).toInt(),
++      );
++}
++
++class PaginatedResult<T> {
++  final List<T> data;
++  final PaginationMeta meta;
++
++  const PaginatedResult({required this.data, required this.meta});
++}
+
+--- /dev/null
++++ b/lib/models/siswa.dart
+@@ -0,0 +1,55 @@
++// Nilai yang diterima API untuk field dropdown siswa.
++class SiswaOptions {
++  static const List<String> jenisKelamin = ['L', 'P'];
++  static const List<String> kelas = ['10', '11', '12'];
++  static const List<String> jurusan = ['RPL', 'DKV', 'BIDI', 'TKJ', 'AK'];
++}
++
++// Model data siswa sesuai kontrak REST API.
++class Siswa {
++  final int id;
++  final String nipd;
++  final String namaLengkap;
++  final String jenisKelamin;
++  final String? alamat;
++  final String kelas;
++  final String jurusan;
++  final DateTime? createdAt;
++  final DateTime? updatedAt;
++
++  const Siswa({
++    required this.id,
++    required this.nipd,
++    required this.namaLengkap,
++    required this.jenisKelamin,
++    required this.alamat,
++    required this.kelas,
++    required this.jurusan,
++    required this.createdAt,
++    required this.updatedAt,
++  });
++
++  factory Siswa.fromJson(Map<String, dynamic> json) => Siswa(
++        id: (json['id'] as num).toInt(),
++        nipd: json['nipd']?.toString() ?? '',
++        namaLengkap: json['nama_lengkap']?.toString() ?? '',
++        jenisKelamin: json['jenis_kelamin']?.toString() ?? '',
++        alamat: json['alamat']?.toString(),
++        kelas: json['kelas']?.toString() ?? '',
++        jurusan: json['jurusan']?.toString() ?? '',
++        createdAt: _date(json['created_at']),
++        updatedAt: _date(json['updated_at']),
++      );
++
++  Map<String, dynamic> toJson() => {
++        'nipd': nipd,
++        'nama_lengkap': namaLengkap,
++        'jenis_kelamin': jenisKelamin,
++        'alamat': alamat,
++        'kelas': kelas,
++        'jurusan': jurusan,
++      };
++
++  static DateTime? _date(dynamic value) =>
++      value == null ? null : DateTime.parse(value.toString()).toLocal();
++}
+
+--- /dev/null
++++ b/lib/pages/siswa_detail_page.dart
+@@ -0,0 +1,58 @@
++import 'package:flutter/material.dart';
++
++import '../models/siswa.dart';
++import 'siswa_form_page.dart';
++
++// Halaman detail satu data siswa.
++class SiswaDetailPage extends StatelessWidget {
++  final Siswa siswa;
++  const SiswaDetailPage({super.key, required this.siswa});
++
++  @override
++  Widget build(BuildContext context) {
++    final values = <String, String>{
++      'ID': '${siswa.id}',
++      'NIPD': siswa.nipd,
++      'Nama lengkap': siswa.namaLengkap,
++      'Jenis kelamin': siswa.jenisKelamin == 'L' ? 'Laki-laki (L)' : 'Perempuan (P)',
++      'Kelas': siswa.kelas,
++      'Jurusan': siswa.jurusan,
++      'Alamat': siswa.alamat?.isNotEmpty == true ? siswa.alamat! : 'Belum diisi',
++      'Dibuat': siswa.createdAt?.toString() ?? '-',
++      'Diperbarui': siswa.updatedAt?.toString() ?? '-',
++    };
++    return Scaffold(
++      appBar: AppBar(title: const Text('Detail Siswa')),
++      body: Center(
++        child: ConstrainedBox(
++          constraints: const BoxConstraints(maxWidth: 700),
++          child: ListView(
++            padding: const EdgeInsets.all(20),
++            children: [
++              Card(
++                child: Padding(
++                  padding: const EdgeInsets.all(18),
++                  child: Column(
++                    children: values.entries.map((entry) => ListTile(
++                      title: Text(entry.key, style: const TextStyle(fontSize: 12, color: Colors.black54)),
++                      subtitle: Text(entry.value, style: const TextStyle(fontSize: 16)),
++                    )).toList(),
++                  ),
++                ),
++              ),
++              const SizedBox(height: 12),
++              FilledButton.icon(
++                onPressed: () async {
++                  final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => SiswaFormPage(siswa: siswa)));
++                  if (context.mounted && changed == true) Navigator.pop(context, true);
++                },
++                icon: const Icon(Icons.edit_outlined),
++                label: const Text('Edit Siswa'),
++              ),
++            ],
++          ),
++        ),
++      ),
++    );
++  }
++}
+
+--- /dev/null
++++ b/lib/pages/siswa_form_page.dart
+@@ -0,0 +1,193 @@
++import 'package:flutter/material.dart';
++
++import '../models/siswa.dart';
++import '../services/api_client.dart';
++import '../services/siswa_service.dart';
++
++// Form tambah dan edit siswa; hanya mengirim field yang berubah saat edit.
++class SiswaFormPage extends StatefulWidget {
++  final Siswa? siswa;
++  const SiswaFormPage({super.key, this.siswa});
++
++  @override
++  State<SiswaFormPage> createState() => _SiswaFormPageState();
++}
++
++class _SiswaFormPageState extends State<SiswaFormPage> {
++  final _formKey = GlobalKey<FormState>();
++  final _nipd = TextEditingController();
++  final _nama = TextEditingController();
++  final _alamat = TextEditingController();
++  final _service = SiswaService();
++  String? _jenisKelamin;
++  String? _kelas;
++  String? _jurusan;
++  bool _loading = false;
++  final Map<String, String> _fieldErrors = {};
++
++  bool get _isEdit => widget.siswa != null;
++
++  @override
++  void initState() {
++    super.initState();
++    final siswa = widget.siswa;
++    if (siswa != null) {
++      _nipd.text = siswa.nipd;
++      _nama.text = siswa.namaLengkap;
++      _alamat.text = siswa.alamat ?? '';
++      _jenisKelamin = siswa.jenisKelamin;
++      _kelas = siswa.kelas;
++      _jurusan = siswa.jurusan;
++    }
++  }
++
++  @override
++  void dispose() {
++    _nipd.dispose();
++    _nama.dispose();
++    _alamat.dispose();
++    super.dispose();
++  }
++
++  String? _requiredText(String? value, String label) {
++    if (value == null || value.trim().isEmpty) return '$label wajib diisi.';
++    if (value.trim().length > 50) return '$label maksimal 50 karakter.';
++    return null;
++  }
++
++  Future<void> _save() async {
++    if (!_formKey.currentState!.validate() || _loading) return;
++    setState(() {
++      _loading = true;
++      _fieldErrors.clear();
++    });
++    final allValues = <String, dynamic>{
++      'nipd': _nipd.text.trim(),
++      'nama_lengkap': _nama.text.trim(),
++      'jenis_kelamin': _jenisKelamin,
++      'kelas': _kelas,
++      'jurusan': _jurusan,
++      'alamat': _alamat.text.trim().isEmpty ? null : _alamat.text.trim(),
++    };
++    final payload = <String, dynamic>{};
++    if (!_isEdit) {
++      payload.addAll(allValues);
++    } else {
++      final old = widget.siswa!;
++      if (allValues['nipd'] != old.nipd) payload['nipd'] = allValues['nipd'];
++      if (allValues['nama_lengkap'] != old.namaLengkap) payload['nama_lengkap'] = allValues['nama_lengkap'];
++      if (allValues['jenis_kelamin'] != old.jenisKelamin) payload['jenis_kelamin'] = allValues['jenis_kelamin'];
++      if (allValues['kelas'] != old.kelas) payload['kelas'] = allValues['kelas'];
++      if (allValues['jurusan'] != old.jurusan) payload['jurusan'] = allValues['jurusan'];
++      if (allValues['alamat'] != old.alamat) payload['alamat'] = allValues['alamat'];
++      if (payload.isEmpty) {
++        Navigator.pop(context, true);
++        return;
++      }
++    }
++
++    try {
++      if (_isEdit) {
++        await _service.update(widget.siswa!.id, payload);
++      } else {
++        await _service.create(payload);
++      }
++      if (mounted) Navigator.pop(context, true);
++    } on ApiException catch (error) {
++      if (!mounted) return;
++      setState(() => _fieldErrors.addAll(error.fieldErrors));
++      final message = error.statusCode == 409
++          ? 'NIPD sudah terdaftar. Gunakan NIPD lain.'
++          : error.message;
++      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
++    } catch (_) {
++      if (mounted) {
++        ScaffoldMessenger.of(context).showSnackBar(
++          const SnackBar(content: Text('Terjadi kesalahan saat menyimpan data.')),
++        );
++      }
++    } finally {
++      if (mounted) setState(() => _loading = false);
++    }
++  }
++
++  InputDecoration _decoration(String label, String key) => InputDecoration(
++        labelText: label,
++        border: const OutlineInputBorder(),
++        errorText: _fieldErrors[key],
++      );
++
++  @override
++  Widget build(BuildContext context) {
++    return Scaffold(
++      appBar: AppBar(title: Text(_isEdit ? 'Edit Siswa' : 'Input Siswa')),
++      body: Center(
++        child: ConstrainedBox(
++          constraints: const BoxConstraints(maxWidth: 650),
++          child: Form(
++            key: _formKey,
++            child: ListView(
++              padding: const EdgeInsets.all(20),
++              children: [
++                TextFormField(
++                  controller: _nipd,
++                  maxLength: 50,
++                  decoration: _decoration('NIPD', 'nipd'),
++                  validator: (v) => _requiredText(v, 'NIPD'),
++                  onChanged: (_) => setState(() => _fieldErrors.remove('nipd')),
++                ),
++                const SizedBox(height: 12),
++                TextFormField(
++                  controller: _nama,
++                  maxLength: 50,
++                  decoration: _decoration('Nama lengkap', 'nama_lengkap'),
++                  validator: (v) => _requiredText(v, 'Nama lengkap'),
++                  onChanged: (_) => setState(() => _fieldErrors.remove('nama_lengkap')),
++                ),
++                const SizedBox(height: 12),
++                DropdownButtonFormField<String>(
++                  value: _jenisKelamin,
++                  decoration: _decoration('Jenis kelamin', 'jenis_kelamin'),
++                  items: SiswaOptions.jenisKelamin.map((v) => DropdownMenuItem(value: v, child: Text(v == 'L' ? 'Laki-laki (L)' : 'Perempuan (P)'))).toList(),
++                  validator: (v) => v == null ? 'Jenis kelamin wajib dipilih.' : null,
++                  onChanged: (v) => setState(() { _jenisKelamin = v; _fieldErrors.remove('jenis_kelamin'); }),
++                ),
++                const SizedBox(height: 12),
++                DropdownButtonFormField<String>(
++                  value: _kelas,
++                  decoration: _decoration('Kelas', 'kelas'),
++                  items: SiswaOptions.kelas.map((v) => DropdownMenuItem(value: v, child: Text('Kelas $v'))).toList(),
++                  validator: (v) => v == null ? 'Kelas wajib dipilih.' : null,
++                  onChanged: (v) => setState(() { _kelas = v; _fieldErrors.remove('kelas'); }),
++                ),
++                const SizedBox(height: 12),
++                DropdownButtonFormField<String>(
++                  value: _jurusan,
++                  decoration: _decoration('Jurusan', 'jurusan'),
++                  items: SiswaOptions.jurusan.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
++                  validator: (v) => v == null ? 'Jurusan wajib dipilih.' : null,
++                  onChanged: (v) => setState(() { _jurusan = v; _fieldErrors.remove('jurusan'); }),
++                ),
++                const SizedBox(height: 12),
++                TextFormField(
++                  controller: _alamat,
++                  maxLength: 50,
++                  maxLines: 3,
++                  decoration: _decoration('Alamat (opsional)', 'alamat'),
++                  validator: (v) => v != null && v.length > 50 ? 'Alamat maksimal 50 karakter.' : null,
++                  onChanged: (_) => setState(() => _fieldErrors.remove('alamat')),
++                ),
++                const SizedBox(height: 20),
++                FilledButton.icon(
++                  onPressed: _loading ? null : _save,
++                  icon: _loading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
++                  label: Text(_loading ? 'Menyimpan...' : 'Simpan'),
++                ),
++              ],
++            ),
++          ),
++        ),
++      ),
++    );
++  }
++}
+
+--- /dev/null
++++ b/lib/services/api_client.dart
+@@ -0,0 +1,171 @@
++import 'dart:async';
++import 'dart:convert';
++
++import 'package:flutter/foundation.dart';
++import 'package:flutter_secure_storage/flutter_secure_storage.dart';
++import 'package:http/http.dart' as http;
++
++// Exception terstruktur untuk error HTTP, validasi, dan jaringan.
++class ApiException implements Exception {
++  final int? statusCode;
++  final String message;
++  final Map<String, String> fieldErrors;
++
++  const ApiException({
++    this.statusCode,
++    required this.message,
++    this.fieldErrors = const {},
++  });
++
++  @override
++  String toString() => message;
++}
++
++// Satu pintu komunikasi HTTP agar token, timeout, dan error konsisten.
++class ApiClient {
++  ApiClient._();
++
++  static final ApiClient instance = ApiClient._();
++  static const FlutterSecureStorage _storage = FlutterSecureStorage();
++  static const String _tokenKey = 'auth_token';
++  static const Duration _timeout = Duration(seconds: 12);
++  static const String baseUrl = String.fromEnvironment(
++    'API_BASE_URL',
++    defaultValue: 'http://127.0.0.1:3000/api',
++  );
++
++  // Diatur oleh pengelola sesi; tidak membutuhkan BuildContext.
++  VoidCallback? onUnauthorized;
++  bool _handlingUnauthorized = false;
++
++  Future<String?> readToken() => _storage.read(key: _tokenKey);
++
++  Future<void> saveToken(String token) =>
++      _storage.write(key: _tokenKey, value: token);
++
++  Future<void> clearToken() => _storage.delete(key: _tokenKey);
++
++  Future<dynamic> get(String path,
++      {Map<String, String>? query, bool authenticated = true}) =>
++      request('GET', path, query: query, authenticated: authenticated);
++
++  Future<dynamic> post(String path, {Object? body, bool authenticated = true}) =>
++      request('POST', path, body: body, authenticated: authenticated);
++
++  Future<dynamic> put(String path, {Object? body, bool authenticated = true}) =>
++      request('PUT', path, body: body, authenticated: authenticated);
++
++  Future<dynamic> delete(String path, {bool authenticated = true}) =>
++      request('DELETE', path, authenticated: authenticated);
++
++  Future<dynamic> request(
++    String method,
++    String path, {
++    Map<String, String>? query,
++    Object? body,
++    bool authenticated = true,
++  }) async {
++    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
++    final headers = <String, String>{
++      'Accept': 'application/json',
++      if (body != null) 'Content-Type': 'application/json',
++    };
++
++    if (authenticated) {
++      final token = await readToken();
++      if (token == null || token.isEmpty) {
++        await _handleUnauthorized();
++        throw const ApiException(statusCode: 401, message: 'Sesi habis. Silakan login kembali.');
++      }
++      headers['Authorization'] = 'Bearer $token';
++    }
++
++    try {
++      late http.Response response;
++      final encodedBody = body == null ? null : jsonEncode(body);
++      switch (method) {
++        case 'GET':
++          response = await http.get(uri, headers: headers).timeout(_timeout);
++          break;
++        case 'POST':
++          response = await http.post(uri, headers: headers, body: encodedBody).timeout(_timeout);
++          break;
++        case 'PUT':
++          response = await http.put(uri, headers: headers, body: encodedBody).timeout(_timeout);
++          break;
++        case 'DELETE':
++          response = await http.delete(uri, headers: headers).timeout(_timeout);
++          break;
++        default:
++          throw ArgumentError('Metode HTTP tidak didukung: $method');
++      }
++
++      if (response.statusCode == 204) return null;
++
++      dynamic decoded;
++      try {
++        decoded = jsonDecode(response.body);
++      } on FormatException {
++        if (response.statusCode >= 200 && response.statusCode < 300) {
++          throw const ApiException(message: 'Format respons server tidak valid.');
++        }
++        decoded = null;
++      }
++
++      if (response.statusCode >= 200 && response.statusCode < 300) {
++        if (decoded is Map<String, dynamic> && decoded['success'] == false) {
++          throw ApiException(
++            statusCode: response.statusCode,
++            message: decoded['message']?.toString() ?? 'Permintaan gagal.',
++          );
++        }
++        return decoded;
++      }
++
++      final map = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
++      if (response.statusCode == 401 && authenticated) {
++        await _handleUnauthorized();
++      }
++      final errors = <String, String>{};
++      final rawErrors = map['errors'];
++      if (rawErrors is List) {
++        for (final item in rawErrors) {
++          if (item is Map) {
++            final field = item['field']?.toString();
++            final message = item['message']?.toString();
++            if (field != null && message != null) errors[field] = message;
++          }
++        }
++      }
++      final fallback = switch (response.statusCode) {
++        401 => 'Sesi habis. Silakan login kembali.',
++        409 => 'Data bertentangan dengan data yang sudah ada.',
++        422 => 'Periksa kembali data yang dimasukkan.',
++        429 => 'Terlalu banyak percobaan. Coba lagi beberapa saat.',
++        _ => 'Permintaan gagal (HTTP ${response.statusCode}).',
++      };
++      throw ApiException(
++        statusCode: response.statusCode,
++        message: map['message']?.toString() ?? fallback,
++        fieldErrors: errors,
++      );
++    } on TimeoutException {
++      throw const ApiException(message: 'Permintaan ke server melewati batas waktu. Periksa koneksi dan server.');
++    } on http.ClientException {
++      throw const ApiException(message: 'Tidak dapat terhubung ke server. Periksa alamat API dan koneksi jaringan.');
++    } on FormatException {
++      throw const ApiException(message: 'Format respons server tidak valid.');
++    }
++  }
++
++  Future<void> _handleUnauthorized() async {
++    if (_handlingUnauthorized) return;
++    _handlingUnauthorized = true;
++    try {
++      await clearToken();
++      onUnauthorized?.call();
++    } finally {
++      _handlingUnauthorized = false;
++    }
++  }
++}
+
+--- /dev/null
++++ b/lib/services/siswa_service.dart
+@@ -0,0 +1,54 @@
++import '../models/paginated_result.dart';
++import '../models/siswa.dart';
++import 'api_client.dart';
++
++// Class untuk semua operasi CRUD siswa melalui REST API.
++class SiswaService {
++  final ApiClient _api = ApiClient.instance;
++
++  Future<PaginatedResult<Siswa>> getSiswa({
++    int page = 1,
++    int limit = 10,
++    String search = '',
++    String? kelas,
++    String? jurusan,
++    String? jenisKelamin,
++  }) async {
++    final query = <String, String>{
++      'page': '$page',
++      'limit': '$limit',
++      if (search.trim().isNotEmpty) 'search': search.trim(),
++      if (kelas != null && kelas.isNotEmpty) 'kelas': kelas,
++      if (jurusan != null && jurusan.isNotEmpty) 'jurusan': jurusan,
++      if (jenisKelamin != null && jenisKelamin.isNotEmpty) 'jenis_kelamin': jenisKelamin,
++    };
++    final result = await _api.get('/siswa', query: query);
++    if (result is! Map<String, dynamic> || result['data'] is! List || result['meta'] is! Map) {
++      throw const ApiException(message: 'Format daftar siswa dari server tidak valid.');
++    }
++    final rows = (result['data'] as List)
++        .map((item) => Siswa.fromJson(Map<String, dynamic>.from(item as Map)))
++        .toList();
++    final meta = PaginationMeta.fromJson(Map<String, dynamic>.from(result['meta'] as Map));
++    return PaginatedResult<Siswa>(data: rows, meta: meta);
++  }
++
++  Future<Siswa> getById(int id) async => _siswaFromResult(await _api.get('/siswa/$id'));
++
++  Future<Siswa> create(Map<String, dynamic> payload) async =>
++      _siswaFromResult(await _api.post('/siswa', body: payload));
++
++  Future<Siswa> update(int id, Map<String, dynamic> payload) async =>
++      _siswaFromResult(await _api.put('/siswa/$id', body: payload));
++
++  Future<void> delete(int id) async {
++    await _api.delete('/siswa/$id');
++  }
++
++  Siswa _siswaFromResult(dynamic result) {
++    if (result is! Map<String, dynamic> || result['data'] is! Map) {
++      throw const ApiException(message: 'Format data siswa dari server tidak valid.');
++    }
++    return Siswa.fromJson(Map<String, dynamic>.from(result['data'] as Map));
++  }
++}
+

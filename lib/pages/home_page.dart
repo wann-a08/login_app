@@ -1,9 +1,11 @@
 
 import 'package:flutter/material.dart';
+import '../core/app_session.dart';
 
 // Class untuk halaman Home dan dashboard admin.
 class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+  final AppSession session;
+  const HomePage({super.key, required this.session});
 
   static const Color navy = Color(0xFF172B4D);
   static const Color blue = Color(0xFF2563EB);
@@ -119,12 +121,11 @@ class HomePage extends StatelessWidget {
                           description: 'Keluar dari dashboard admin',
                           icon: Icons.logout,
                           color: const Color(0xFFDC2626),
-                          onTap: () {
-                            Navigator.pushNamedAndRemoveUntil(
-                              context,
-                              '/',
-                                  (route) => false,
-                            );
+                          onTap: () async {
+                            await session.logout();
+                            if (context.mounted) {
+                              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+                            }
                           },
                         ),
                       ],
