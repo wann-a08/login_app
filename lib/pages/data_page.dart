@@ -18,18 +18,24 @@ class DataPage extends StatefulWidget {
 
 class _DataPageState extends State<DataPage> {
   final SiswaService _service = SiswaService();
-  final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _searchController =
+      TextEditingController();
+
   Timer? _debounce;
+
   static const Color navy = Color(0xFF172B4D);
   static const Color background = Color(0xFFF4F6FA);
 
   List<Siswa> _siswa = [];
+
   bool _loading = false;
   String? _error;
+
   int _page = 1;
   final int _limit = 10;
   int _total = 0;
   int _totalPages = 1;
+
   String? _kelas;
   String? _jurusan;
   String? _jenisKelamin;
@@ -47,8 +53,13 @@ class _DataPageState extends State<DataPage> {
     super.dispose();
   }
 
+  // Memuat data siswa dari API.
   Future<void> _load({int page = 1}) async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
     try {
       final result = await _service.getSiswa(
         page: page,
@@ -58,62 +69,122 @@ class _DataPageState extends State<DataPage> {
         jurusan: _jurusan,
         jenisKelamin: _jenisKelamin,
       );
+
       if (!mounted) return;
+
       setState(() {
         _siswa = result.data;
         _page = result.meta.page;
         _total = result.meta.total;
-        _totalPages = result.meta.totalPages < 1 ? 1 : result.meta.totalPages;
+        _totalPages =
+            result.meta.totalPages < 1 ? 1 : result.meta.totalPages;
       });
     } on ApiException catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      if (mounted) {
+        setState(() => _error = error.message);
+      }
     } catch (_) {
-      if (mounted) setState(() => _error = 'Gagal memuat data siswa.');
+      if (mounted) {
+        setState(() => _error = 'Gagal memuat data siswa.');
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
-  void _searchChanged(String _) {
+  // Pencarian dengan debounce.
+  void _searchChanged(String value) {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), () => _load());
+
+    _debounce = Timer(
+      const Duration(milliseconds: 400),
+      () => _load(),
+    );
   }
 
+  // Membuka halaman tambah atau edit siswa.
   Future<void> _openForm({Siswa? siswa}) async {
-    final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => SiswaFormPage(siswa: siswa)));
-    if (mounted && changed == true) _load(page: _page);
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SiswaFormPage(siswa: siswa),
+      ),
+    );
+
+    if (mounted && changed == true) {
+      _load(page: _page);
+    }
   }
 
+  // Membuka halaman detail siswa.
   Future<void> _openDetail(Siswa siswa) async {
-    final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => SiswaDetailPage(siswa: siswa)));
-    if (mounted && changed == true) _load(page: _page);
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SiswaDetailPage(siswa: siswa),
+      ),
+    );
+
+    if (mounted && changed == true) {
+      _load(page: _page);
+    }
   }
 
+  // Menghapus data siswa.
   Future<void> _delete(Siswa siswa) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Hapus siswa?'),
-        content: Text('Data ${siswa.namaLengkap} (${siswa.nipd}) akan dihapus.'),
+        content: Text(
+          'Data ${siswa.namaLengkap} (${siswa.nipd}) akan dihapus.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Hapus')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Hapus'),
+          ),
         ],
       ),
     );
+
     if (confirmed != true) return;
+
     try {
       await _service.delete(siswa.id);
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Data siswa berhasil dihapus.')));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Data siswa berhasil dihapus.'),
+        ),
+      );
+
       _load(page: _page);
     } on ApiException catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message)),
+        );
+      }
     }
   }
 
+  // Menghapus seluruh filter.
   void _resetFilters() {
-    setState(() { _kelas = null; _jurusan = null; _jenisKelamin = null; });
+    setState(() {
+      _kelas = null;
+      _jurusan = null;
+      _jenisKelamin = null;
+    });
+
     _load();
   }
 
@@ -121,22 +192,27 @@ class _DataPageState extends State<DataPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: background,
+
       appBar: AppBar(
         title: const Text('Data Siswa'),
         backgroundColor: navy,
         foregroundColor: Colors.white,
-        actions: [IconButton(tooltip: 'Muat ulang', onPressed: _loading ? null : () => _load(page: _page), icon: const Icon(Icons.refresh))],
+        actions: [
+          IconButton(
+            tooltip: 'Muat ulang',
+            onPressed: _loading ? null : () => _load(page: _page),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openForm(),
-        icon: const Icon(Icons.person_add_alt_1),
-        label: const Text('Tambah Siswa'),
-      ),
+
+      // Konten utama halaman.
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1100),
           child: Column(
             children: [
+              // Search dan filter.
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 child: Column(
@@ -147,93 +223,183 @@ class _DataPageState extends State<DataPage> {
                       decoration: InputDecoration(
                         labelText: 'Cari nama atau NIPD',
                         prefixIcon: const Icon(Icons.search),
-                        suffixIcon: IconButton(icon: const Icon(Icons.clear), onPressed: () { _searchController.clear(); _searchChanged(''); }),
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            _searchChanged('');
+                          },
+                        ),
                         border: const OutlineInputBorder(),
                       ),
                     ),
+
                     const SizedBox(height: 10),
-                      Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              _filter<String>(
-                'Kelas',
-                _kelas,
-                ['10', '11', '12']
-                    .map((v) => DropdownMenuItem(
-                          value: v,
-                          child: Text(v),
-                        ))
-                    .toList(),
-                (value) {
-                  setState(() => _kelas = value);
-                  _load();
-                },
-              ),
-              _filter<String>(
-                'Jurusan',
-                _jurusan,
-                ['RPL', 'DKV', 'BIDI', 'TKJ', 'AK']
-                    .map((v) => DropdownMenuItem(
-                          value: v,
-                          child: Text(v),
-                        ))
-                    .toList(),
-                (value) {
-                  setState(() => _jurusan = value);
-                  _load();
-                },
-              ),
-              _filter<String>(
-                'Jenis kelamin',
-                _jenisKelamin,
-                const [
-                  DropdownMenuItem(value: 'L', child: Text('Laki-laki')),
-                  DropdownMenuItem(value: 'P', child: Text('Perempuan')),
-                ],
-                (value) {
-                  setState(() => _jenisKelamin = value);
-                  _load();
-                },
-              ),
-          OutlinedButton.icon(
-            onPressed: _resetFilters,
-            icon: const Icon(Icons.filter_alt_off),
-            label: const Text('Reset filter'),
-          ),
-        ],
-      ),
+
+                    // Filter kelas, jurusan, dan jenis kelamin.
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        _filter<String>(
+                          'Kelas',
+                          _kelas,
+                          ['10', '11', '12']
+                              .map(
+                                (v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v),
+                                ),
+                              )
+                              .toList(),
+                          (value) {
+                            setState(() => _kelas = value);
+                            _load();
+                          },
+                        ),
+
+                        _filter<String>(
+                          'Jurusan',
+                          _jurusan,
+                          ['RPL', 'DKV', 'BIDI', 'TKJ', 'AK']
+                              .map(
+                                (v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v),
+                                ),
+                              )
+                              .toList(),
+                          (value) {
+                            setState(() => _jurusan = value);
+                            _load();
+                          },
+                        ),
+
+                        _filter<String>(
+                          'Jenis kelamin',
+                          _jenisKelamin,
+                          const [
+                            DropdownMenuItem(
+                              value: 'L',
+                              child: Text('Laki-laki'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'P',
+                              child: Text('Perempuan'),
+                            ),
+                          ],
+                          (value) {
+                            setState(() => _jenisKelamin = value);
+                            _load();
+                          },
+                        ),
+
+                        OutlinedButton.icon(
+                          onPressed: _resetFilters,
+                          icon: const Icon(Icons.filter_alt_off),
+                          label: const Text('Reset filter'),
+                        ),
+                      ],
+                    ),
+
                     const SizedBox(height: 8),
-                    Align(alignment: Alignment.centerLeft, child: Text('Total siswa: $_total')),
+
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Total siswa: $_total'),
+                    ),
                   ],
                 ),
               ),
+
+              // Indikator loading.
               if (_loading) const LinearProgressIndicator(),
+
+              // Pesan error.
               if (_error != null)
-                Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: const TextStyle(color: Colors.red))),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    _error!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+
+              // Daftar siswa.
               Expanded(
                 child: _loading && _siswa.isEmpty
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const Center(
+                        child: CircularProgressIndicator(),
+                      )
                     : _siswa.isEmpty
-                        ? const Center(child: Text('Data siswa tidak ditemukan.'))
+                        ? const Center(
+                            child: Text(
+                              'Data siswa tidak ditemukan.',
+                            ),
+                          )
                         : ListView.separated(
-                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                            padding: const EdgeInsets.fromLTRB(
+                              16,
+                              4,
+                              16,
+                              16,
+                            ),
                             itemCount: _siswa.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 8),
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 8),
                             itemBuilder: (context, index) {
                               final siswa = _siswa[index];
+
                               return Card(
                                 child: ListTile(
                                   onTap: () => _openDetail(siswa),
-                                  leading: CircleAvatar(backgroundColor: const Color(0xFFDBEAFE), child: Text(siswa.namaLengkap.isEmpty ? '?' : siswa.namaLengkap.characters.first.toUpperCase())),
-                                  title: Text(siswa.namaLengkap, style: const TextStyle(fontWeight: FontWeight.w600)),
-                                  subtitle: Text('NIPD: ${siswa.nipd} • Kelas ${siswa.kelas} ${siswa.jurusan}\n${siswa.jenisKelamin == 'L' ? 'Laki-laki' : 'Perempuan'}'),
+
+                                  leading: CircleAvatar(
+                                    backgroundColor:
+                                        const Color(0xFFDBEAFE),
+                                    child: Text(
+                                      siswa.namaLengkap.isEmpty
+                                          ? '?'
+                                          : siswa.namaLengkap.characters
+                                              .first
+                                              .toUpperCase(),
+                                    ),
+                                  ),
+
+                                  title: Text(
+                                    siswa.namaLengkap,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+
+                                  subtitle: Text(
+                                    'NIPD: ${siswa.nipd} • '
+                                    'Kelas ${siswa.kelas} ${siswa.jurusan}\n'
+                                    '${siswa.jenisKelamin == 'L' ? 'Laki-laki' : 'Perempuan'}',
+                                  ),
+
                                   isThreeLine: true,
+
                                   trailing: PopupMenuButton<String>(
-                                    onSelected: (value) { if (value == 'edit') _openForm(siswa: siswa); if (value == 'delete') _delete(siswa); },
+                                    onSelected: (value) {
+                                      if (value == 'edit') {
+                                        _openForm(siswa: siswa);
+                                      }
+
+                                      if (value == 'delete') {
+                                        _delete(siswa);
+                                      }
+                                    },
                                     itemBuilder: (_) => const [
-                                      PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                      PopupMenuItem(value: 'delete', child: Text('Hapus')),
+                                      PopupMenuItem(
+                                        value: 'edit',
+                                        child: Text('Edit'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: Text('Hapus'),
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -241,14 +407,50 @@ class _DataPageState extends State<DataPage> {
                             },
                           ),
               ),
+
+              // Tombol tambah siswa dan pagination.
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(onPressed: !_loading || _page > 1 ? () => _load(page: _page - 1) : null, icon: const Icon(Icons.chevron_left)),
-                    Text('Halaman $_page dari $_totalPages'),
-                    IconButton(onPressed: !_loading && _page < _totalPages ? () => _load(page: _page + 1) : null, icon: const Icon(Icons.chevron_right)),
+                    // Tombol tambah siswa.
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.icon(
+                        onPressed: () => _openForm(),
+                        icon: const Icon(
+                          Icons.person_add_alt_1,
+                        ),
+                        label: const Text('Tambah Siswa'),
+                      ),
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // Navigasi halaman.
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          onPressed: !_loading && _page > 1
+                              ? () => _load(page: _page - 1)
+                              : null,
+                          icon: const Icon(Icons.chevron_left),
+                        ),
+
+                        Text(
+                          'Halaman $_page dari $_totalPages',
+                        ),
+
+                        IconButton(
+                          onPressed: !_loading && _page < _totalPages
+                              ? () => _load(page: _page + 1)
+                              : null,
+                          icon: const Icon(Icons.chevron_right),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -259,34 +461,35 @@ class _DataPageState extends State<DataPage> {
     );
   }
 
-Widget _filter<T>(
-  String label,
-  T? value,
-  List<DropdownMenuItem<T>> items,
-  ValueChanged<T?> onChanged,
-) {
-  return SizedBox(
-    width: 180,
-    child: DropdownButtonFormField<T>(
-      value: value,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        isDense: true,
-      ),
-      items: [
-        DropdownMenuItem<T>(
-          value: null,
-          child: Text(
-            'Semua $label',
-            overflow: TextOverflow.ellipsis,
-          ),
+  // Widget dropdown untuk filter.
+  Widget _filter<T>(
+    String label,
+    T? value,
+    List<DropdownMenuItem<T>> items,
+    ValueChanged<T?> onChanged,
+  ) {
+    return SizedBox(
+      width: 180,
+      child: DropdownButtonFormField<T>(
+        value: value,
+        isExpanded: true,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          isDense: true,
         ),
-        ...items,
-      ],
-      onChanged: onChanged,
-    ),
-  );
-}
+        items: [
+          DropdownMenuItem<T>(
+            value: null,
+            child: Text(
+              'Semua $label',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          ...items,
+        ],
+        onChanged: onChanged,
+      ),
+    );
+  }
 }
