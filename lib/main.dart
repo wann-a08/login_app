@@ -45,8 +45,6 @@ class MyApp extends StatelessWidget {
           case '/home':
             return MaterialPageRoute(builder: (_) => HomePage(session: session), settings: settings);
           case '/data':
-            return MaterialPageRoute(builder: (_) => const DataPage(), settings: settings);
-          case '/inputdata':
             return MaterialPageRoute(builder: (_) => const HomeInputPage(), settings: settings);
           case '/siswa-form':
             return MaterialPageRoute(builder: (_) => const SiswaFormPage(), settings: settings);
